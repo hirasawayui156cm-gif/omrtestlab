@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OMR 多链路聚合测试台</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+window.EChartsLoaded = false;
+var __tryECharts = 0;
+function __ensureCharts() {
+  if (window.echarts) { window.EChartsLoaded = true; return; }
+  if (__tryECharts >= 3) return;
+  __tryECharts++;
+  var urls = [
+    "https://unpkg.com/echarts@5.4.3/dist/echarts.min.js",
+    "https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js",
+    "https://cdn.staticfile.org/echarts/5.4.3/echarts.min.js"
+  ];
+  var u = urls[__tryECharts - 1];
+  var s = document.createElement("script");
+  s.src = u;
+  s.onload = function(){ window.echarts && (window.EChartsLoaded = true); };
+  s.onerror = function(){ __ensureCharts(); };
+  document.head.appendChild(s);
+}
+if (!window.echarts) __ensureCharts();
+</script>
+</head>
+<body>
+<header class="topbar">
+  <h1>OMR 多链路聚合测试台</h1>
+  <div class="topbar-right">
+    <span id="runStatus" class="status-dot idle"></span>
+    <span id="runStatusText">空闲</span>
+    <span class="sep"></span>
+    <span id="connState">未连接</span>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="env">环境配置</button>
+  <button class="tab" data-tab="design">实验设计</button>
+  <button class="tab" data-tab="run">运行测试</button>
+  <button class="tab" data-tab="result">结果分析</button>
+</nav>
+
+<main>
+  <!-- ============ 环境配置 ============ -->
+  <section id="tab-env" class="tabpage active">
+    <div class="card">
+      <h2>路由器（香蕉派 OMR 客户端）</h2>
+      <div class="grid3">
+        <label>主机地址<input id="r_host" placeholder="192.168.100.1"></label>
+        <label>SSH 端口<input id="r_port" type="number" value="22"></label>
+        <label>用户名<input id="r_user" value="root"></label>
+      </div>
+      <div class="grid2">
+        <label>密码<input id="r_pass" type="password" autocomplete="new-password"></label>
+        <label class="chk"><input type="checkbox" id="r_sudo"> 使用 sudo 执行</label>
+      </div>
+      <div class="btnrow">
+        <button onclick="checkHost('router')">测试 SSH 连接</button>
+        <button onclick="refreshInterfaces()">检测 WAN 接口</button>
+        <span id="r_ifaces" class="hint"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>VPS（OMR 服务端 / iperf3 Server）</h2>
+      <div class="grid3">
+        <label>主机地址<input id="v_host" placeholder="VPS 公网 IP"></label>
+        <label>SSH 端口<input id="v_port" type="number" value="22"></label>
+        <label>用户名<input id="v_user" value="root"></label>
+      </div>
+      <div class="grid2">
+        <label>密码<input id="v_pass" type="password" autocomplete="new-password"></label>
+        <label class="chk"><input type="checkbox" id="v_sudo"> 使用 sudo 执行</label>
+      </div>
+      <div class="grid2">
+        <label>iperf3 端口<input id="i_port" type="number" value="5201"></label>
+        <label class="chk"><input type="checkbox" id="i_mptcp" checked> iperf3 使用 MPTCP(--mptcp)</label>
+      </div>
+      <div class="btnrow">
+        <button onclick="checkHost('vps')">测试 SSH 连接</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>一键准备环境</h2>
+      <p class="hint">检查/安装路由器与 VPS 上的 iperf3，并在 VPS 启动 iperf3 服务端（需 VPS 防火墙放行 UDP 端口，通常为 5201）。</p>
+      <button class="primary" onclick="prepareEnv()">检查并准备</button>
+      <pre id="prepareOut" class="outbox"></pre>
+    </div>
+  </section>
+
+  <!-- ============ 实验设计 ============ -->
+  <section id="tab-design" class="tabpage">
+    <div class="card">
+      <div class="card-head">
+        <h2>实验组设计（可多组，用于对比）</h2>
+        <div>
+          <button onclick="addGroup()">+ 添加实验组</button>
+          <button class="primary" onclick="saveGroups()">保存设计</button>
+        </div>
+      </div>
+      <div id="groupsEditor"></div>
+    </div>
+  </section>
+
+  <!-- ============ 运行测试 ============ -->
+  <section id="tab-run" class="tabpage">
+    <div class="card">
+      <div class="card-head">
+        <h2>选择要运行的实验组</h2>
+        <div>
+          <button class="primary" id="btnStart" onclick="startRuns()">▶ 开始运行</button>
+          <button id="btnStop" onclick="stopRuns()" disabled>■ 停止</button>
+        </div>
+      </div>
+      <div id="groupSelector"></div>
+      <div id="progressBarWrap" style="display:none">
+        <div class="prog-label"><span id="progText">0 / 0</span><span id="progPhase"></span></div>
+        <div class="progress"><div id="progFill" style="width:0%"></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>实时监控</h2>
+      <div id="liveChart" style="height:320px"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>运行日志</h2><button onclick="clearLog()">清空</button></div>
+      <pre id="logBox" class="logbox"></pre>
+    </div>
+  </section>
+
+  <!-- ============ 结果分析 ============ -->
+  <section id="tab-result" class="tabpage">
+    <div class="card">
+      <div class="card-head">
+        <h2>对比结果</h2>
+        <div>
+          <button onclick="loadResults()">刷新</button>
+          <button onclick="exportCsv()">导出 CSV</button>
+          <button onclick="exportJson()">导出 JSON</button>
+          <button onclick="exportCharts('csv')">导出对比CSV</button>
+          <button onclick="exportCharts('json')">导出对比JSON</button>
+          <button class="danger" onclick="deleteRuns()">清空结果</button>
+        </div>
+      </div>
+      <div class="charts">
+        <div class="chart-box"><h3>聚合吞吐对比（Mbps）</h3><div id="chartThru"></div></div>
+        <div class="chart-box"><h3>聚合效率对比（%）</h3><div id="chartEff"></div></div>
+        <div class="chart-box"><h3>各链路实际负载分布（Mbps）</h3><div id="chartLinks"></div></div>
+        <div class="chart-box"><h3>各链路时延（ms）</h3><div id="chartRtt"></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>明细数据</h2><button onclick="loadResults()">刷新</button></div>
+      <div style="overflow:auto">
+        <table id="runsTable" class="runs">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="selAll" checked title="全选/全不选" onclick="selectAllRows(this.checked)"></th><th>#</th><th>时间</th><th>实验组</th><th>整形</th><th>协议</th><th>理论M</th>
+              <th>上行M</th><th>下行M</th><th>上行效%</th><th>下行效%</th>
+              <th>重传</th><th>抖动ms</th><th>丢包%</th><th>恢复s</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" id="detailCard" style="display:none">
+      <div class="card-head"><h2 id="detailTitle">明细</h2><button onclick="closeDetail()">关闭</button></div>
+      <div class="charts">
+        <div class="chart-box"><h3>iperf3 吞吐时间线</h3><div id="detailTimeline" style="height:280px"></div></div>
+        <div class="chart-box"><h3>各链路实时吞吐（监控）</h3><div id="detailMonitor" style="height:280px"></div></div>
+      </div>
+      <div class="grid2">
+        <div class="chart-box"><h3>每链路配置与实测</h3><div id="detailLinksTable"></div></div>
+        <div class="chart-box"><h3>断链/恢复记录</h3><pre id="detailBreak" class="outbox"></pre></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">OMR Link Aggregation Test Lab · 基于 tc + iperf3 + ECharts</footer>
+<script src="/static/app.js?v=20260903b"></script>
+</body>
+</html>

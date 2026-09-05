@@ -1,0 +1,71 @@
+{
+  "router": {
+    "host": "192.168.100.1",
+    "port": 22,
+    "user": "root",
+    "password": "banana",
+    "use_sudo": false
+  },
+  "vps": {
+    "host": "192.168.10.172",
+    "port": 65222,
+    "user": "u",
+    "password": "1",
+    "use_sudo": true
+  },
+  "iperf3": {
+    "port": 5201,
+    "mptcp": true,
+    "udp_bitrate_mbps": 0
+  },
+  "groups": [
+    {
+      "name": "断链lan1",
+      "duration": 20,
+      "protocol": "tcp",
+      "udp_bitrate_mbps": 0,
+      "links": [
+        {
+          "label": "链路1",
+          "iface": "lan1",
+          "rate_mbps": 50,
+          "delay_ms": 20,
+          "jitter_ms": 0,
+          "loss_pct": 0,
+          "enabled": true
+        },
+        {
+          "label": "链路2",
+          "iface": "lan2",
+          "rate_mbps": 50,
+          "delay_ms": 20,
+          "jitter_ms": 0,
+          "loss_pct": 0,
+          "enabled": true
+        },
+        {
+          "label": "链路3",
+          "iface": "lan3",
+          "rate_mbps": 50,
+          "delay_ms": 20,
+          "jitter_ms": 0,
+          "loss_pct": 0,
+          "enabled": true
+        }
+      ],
+      "break": {
+        "enabled": true,
+        "iface": "lan1",
+        "at_sec": 5,
+        "restore_sec": 2
+      },
+      "shaping": "core",
+      "gid": "R'"
+    }
+  ],
+  "last_links": [
+    "lan1",
+    "lan2",
+    "lan3"
+  ]
+}
