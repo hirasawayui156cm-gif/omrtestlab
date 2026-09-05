@@ -13,6 +13,7 @@ DEFAULT_CONFIG = {
     "vps": {"host": "", "port": 22, "user": "root", "password": "", "use_sudo": False},
     "iperf3": {"port": 5201, "udp_bitrate_mbps": 0, "mptcp": True},
     "last_links": [],
+    "result_order": [],
     "groups": [
         {
             "name": "基线：链路1=100M/10ms + 链路2=50M/20ms",

@@ -183,6 +183,14 @@ def save_groups(body: dict):
 
 
 # ---------------- 运行控制 ----------------
+@app.post("/api/order")
+def save_order(body: dict):
+    ids = body.get("ids", [])
+    if isinstance(ids, list):
+        CONFIG["result_order"] = [int(x) for x in ids if str(x).isdigit()]
+        save_config(CONFIG)
+        return {"ok": True}
+    return {"ok": False, "error": "ids 需为数组"}
 @app.post("/api/runs/start")
 def start_runs(body: dict):
     if RUNNER.running:
@@ -208,7 +216,7 @@ def stop_runs():
 
 @app.get("/api/runs")
 def list_runs():
-    return {"ok": True, "runs": STORAGE.list_all()}
+    return {"ok": True, "runs": _stored_order(STORAGE.list_all())}
 
 
 @app.get("/api/runs/{rid}")
@@ -230,12 +238,27 @@ def delete_run(rid: int):
 
 
 # ---------------- 导出 ----------------
+def _order_by_ids(runs, ids: str) -> list[dict]:
+    if not ids:
+        return runs
+    seq = [int(x) for x in ids.split(",") if x.strip().isdigit()]
+    by_id = {r.get("id"): r for r in runs}
+    return [by_id[i] for i in seq if i in by_id]
+
+
+def _stored_order(runs) -> list[dict]:
+    """按 CONFIG.result_order 排序；没排序到的新结果追加在末尾。"""
+    seq = CONFIG.get("result_order") or []
+    by_id = {r.get("id"): r for r in runs}
+    ordered = [by_id[i] for i in seq if i in by_id]
+    have = {r.get("id") for r in ordered}
+    ordered += [r for r in runs if r.get("id") not in have]
+    return ordered
+
+
 @app.get("/api/export")
 def export(fmt: str = "csv", ids: str = ""):
-    runs = STORAGE.list_all()
-    if ids:
-        id_set = {int(x) for x in ids.split(",") if x.strip().isdigit()}
-        runs = [r for r in runs if r.get("id") in id_set]
+    runs = _order_by_ids(_stored_order(STORAGE.list_all()), ids)
     if fmt == "json":
         return StreamingResponse(
             io.BytesIO(json.dumps(runs, ensure_ascii=False, indent=2).encode("utf-8")),
@@ -263,10 +286,7 @@ def export(fmt: str = "csv", ids: str = ""):
 
 def _chart_rows(ids: str = "") -> list[dict]:
     """生成对比图表用的扁平化数据集（每组一行，含各链路负载/时延列）。"""
-    runs = STORAGE.list_all()
-    if ids:
-        id_set = {int(x) for x in ids.split(",") if x.strip().isdigit()}
-        runs = [r for r in runs if r.get("id") in id_set]
+    runs = _order_by_ids(_stored_order(STORAGE.list_all()), ids)
     ifaces: list[str] = []
     for r in runs:
         for k in (r.get("per_link") or {}):

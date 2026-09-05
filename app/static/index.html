@@ -162,6 +162,7 @@ if (!window.echarts) __ensureCharts();
     <div class="card">
       <div class="card-head"><h2>明细数据</h2><button onclick="loadResults()">刷新</button></div>
       <div style="overflow:auto">
+        <div class="hint" style="margin-bottom:6px">可按住表格行并拖拽到目标行来调整顺序（服务器保存，各电脑一致；只影响明细/对比图/导出的顺序，不改变数据）。</div>
         <table id="runsTable" class="runs">
           <thead>
             <tr>

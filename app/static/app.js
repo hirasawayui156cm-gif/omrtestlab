@@ -411,6 +411,12 @@ function chartOpt(base) {
   }, base);
 }
 
+async function persistRunOrder() {
+  try {
+    await api("/api/order", { method: "POST", body: JSON.stringify({ ids: RUNS.map((r) => r.id) }) });
+  } catch (e) { log("error", "保存排序失败: " + e.message); }
+}
+
 async function loadResults() {
   try {
     const r = await api("/api/runs");
@@ -498,9 +504,9 @@ function clearCharts() {
 function renderRunsTable() {
   const tb = $("runsTable").querySelector("tbody");
   tb.innerHTML = RUNS.map((r, i) => `
-    <tr class="clickable" onclick="showDetail(${i})">
+    <tr class="clickable" draggable="true" data-idx="${i}" onclick="showDetail(${i})">
       <td><input type="checkbox" class="rowsel" data-id="${r.id}" ${selIds.has(r.id) ? "checked" : ""} onclick="event.stopPropagation()"></td>
-      <td>${groupNo(r)}</td><td>${esc(r.ts)}</td><td title="${esc(r.group_name)}">${esc((r.group_name || "").slice(0, 22))}</td>
+      <td style="cursor:grab">${groupNo(r)}</td><td>${esc(r.ts)}</td><td title="${esc(r.group_name)}">${esc((r.group_name || "").slice(0, 22))}</td>
       <td>${r.shaping === "core" ? "CORE" : "程序tc"}</td>
       <td>${(r.protocol || "tcp").toUpperCase()}</td>
       <td>${r.theory_mbps}</td>
@@ -596,8 +602,9 @@ function renderDetailBreak(r) {
 }
 
 function selIdsParam() {
-  if (!selIds.size) return "";
-  return "&ids=" + [...selIds].sort((a, b) => a - b).join(",");
+  const ids = RUNS.filter((r) => selIds.has(r.id)).map((r) => r.id);
+  if (!ids.length) return "";
+  return "&ids=" + ids.join(",");
 }
 async function exportCsv() { window.open("/api/export?fmt=csv" + selIdsParam()); }
 async function exportJson() { window.open("/api/export?fmt=json" + selIdsParam()); }
@@ -628,4 +635,28 @@ $("runsTable").addEventListener("change", (ev) => {
   if (ev.target.classList && ev.target.classList.contains("rowsel")) {
     toggleSel(+ev.target.dataset.id, ev.target.checked);
   }
+});
+// 拖拽调整明细行顺序（只影响展示/图表/导出顺序，不改数据）
+let dragRowIdx = null;
+$("runsTable").addEventListener("dragstart", (ev) => {
+  const tr = ev.target.closest ? ev.target.closest("tr[data-idx]") : null;
+  if (!tr) return;
+  dragRowIdx = +tr.dataset.idx;
+  ev.dataTransfer.effectAllowed = "move";
+});
+$("runsTable").addEventListener("dragover", (ev) => {
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = "move";
+});
+$("runsTable").addEventListener("drop", (ev) => {
+  const tr = ev.target.closest ? ev.target.closest("tr[data-idx]") : null;
+  if (!tr || dragRowIdx == null) { dragRowIdx = null; return; }
+  const to = +tr.dataset.idx;
+  if (dragRowIdx === to) { dragRowIdx = null; return; }
+  const [moved] = RUNS.splice(dragRowIdx, 1);
+  RUNS.splice(to, 0, moved);
+  dragRowIdx = null;
+  renderRunsTable();
+  renderSummaryCharts();
+  persistRunOrder();
 });
