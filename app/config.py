@@ -11,6 +11,8 @@ SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 DEFAULT_CONFIG = {
     "router": {"host": "", "port": 22, "user": "root", "password": "", "use_sudo": False},
     "vps": {"host": "", "port": 22, "user": "root", "password": "", "use_sudo": False},
+    "shaper": {"host": "", "port": 22, "user": "root", "password": "", "use_sudo": False,
+               "core_file": "", "lagsim_file": ""},
     "iperf3": {"port": 5201, "udp_bitrate_mbps": 0, "mptcp": True},
     "last_links": [],
     "result_order": [],

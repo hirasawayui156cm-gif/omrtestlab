@@ -15,6 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import iperf
 from .config import BASE_DIR, load_config, save_config
+from .importer import parse_core_links, parse_lagsim_lanes
 from .runner import Runner
 from .ssh import SSH
 from .storage import Storage
@@ -123,7 +124,7 @@ def _ssh_for(which: str) -> SSH:
 
 @app.post("/api/check/{which}")
 def check_ssh(which: str):
-    if which not in ("router", "vps"):
+    if which not in ("router", "vps", "shaper"):
         return {"ok": False, "error": "unknown"}
     h = CONFIG.get(which, {})
     if not h.get("host"):
@@ -169,7 +170,75 @@ def prepare():
     return results
 
 
-# ---------------- 实验组 ----------------
+@app.post("/api/import")
+def import_params(body: dict):
+    """从 CORE/lagsim 导入参数 → 生成一个"外部整形"实验组。
+
+    body: {kind:'core'|'lagsim', raw?:文本(直接粘贴), fetch?:true(SSH电脑C读文件)}
+    """
+    kind = body.get("kind", "core")
+    lanes = []
+    raw = body.get("raw")
+    if raw is not None:
+        lanes = parse_core_links(raw) if kind == "core" else parse_lagsim_lanes(raw)
+    elif body.get("fetch"):
+        sh = CONFIG.get("shaper", {})
+        if not sh.get("host"):
+            return {"ok": False, "error": "未配置整形网关(电脑C) SSH"}
+        try:
+            ssh = _ssh_for("shaper")
+        except Exception as exc:
+            return {"ok": False, "error": f"连接整形网关失败: {exc}"}
+        f = (sh.get("core_file") if kind == "core" else sh.get("lagsim_file")) or ""
+        if f:
+            rc, out, err = ssh.run(f"cat {f}")
+            raw = out or err
+            ssh.close()
+        else:
+            # 没有配置文件路径时，尝试从 lagsim 命令输出读取
+            if kind == "lagsim":
+                rc, out, _ = ssh.run("lagsim list 2>&1; echo ===; lagsim profiles 2>&1")
+                raw = out
+                ssh.close()
+            else:
+                ssh.close()
+                return {"ok": False, "error": "未配置 CORE 场景文件路径(core_file)，请填写或改用文本粘贴导入"}
+        if raw:
+            lanes = parse_core_links(raw) if kind == "core" else parse_lagsim_lanes(raw)
+    else:
+        return {"ok": False, "error": "需要 raw(粘贴文本) 或 fetch(SSH读取)"}
+
+    if not lanes:
+        return {"ok": False, "error": "未能从输入解析出链路参数，请确认文本格式或检查文件路径",
+                "head": (raw or "")[:500]}
+
+    # 映射到 BPI 链路接口（可按 body.ifaces 覆盖）
+    ifaces = (body.get("ifaces") or ["lan1", "lan2", "lan3"])[: len(lanes)]
+    links = []
+    for idx, (iface, lane) in enumerate(zip(ifaces, lanes)):
+        links.append({
+            "label": f"链路{idx + 1}({iface})",
+            "iface": iface,
+            "rate_mbps": round(lane.get("rate_mbps") or 0, 3),
+            "delay_ms": round(lane.get("delay_ms") or 0, 3),
+            "jitter_ms": round(lane.get("jitter_ms") or 0, 3),
+            "loss_pct": round(lane.get("loss_pct") or 0, 3),
+            "enabled": True,
+        })
+    theory = sum(l["rate_mbps"] for l in links)
+    group = {
+        "name": f"导入-{'CORE' if kind == 'core' else 'lagsim'}-{len(links)}路(th={theory:.0f}M)",
+        "gid": "",
+        "duration": 15, "protocol": "tcp", "udp_bitrate_mbps": 0,
+        "shaping": "core",
+        "links": links,
+        "break": {"enabled": False, "iface": ifaces[0] if ifaces else "", "at_sec": 0, "restore_sec": 5},
+    }
+    return {"ok": True, "group": group, "lanes": lanes}
+def get_groups():
+    return {"ok": True, "groups": CONFIG.get("groups", [])}
+
+
 @app.get("/api/groups")
 def get_groups():
     return {"ok": True, "groups": CONFIG.get("groups", [])}

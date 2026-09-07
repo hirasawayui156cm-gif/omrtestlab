@@ -88,6 +88,27 @@ if (!window.echarts) __ensureCharts();
     </div>
 
     <div class="card">
+      <h2>整形网关（电脑C，跑 CORE / lagsim）</h2>
+      <div class="grid3">
+        <label>主机地址<input id="g_host" placeholder="电脑C的IP"></label>
+        <label>SSH 端口<input id="g_port" type="number" value="22"></label>
+        <label>用户名<input id="g_user" value="root"></label>
+      </div>
+      <div class="grid2">
+        <label>密码<input id="g_pass" type="password" autocomplete="new-password"></label>
+        <label class="chk"><input type="checkbox" id="g_sudo"> 使用 sudo 执行</label>
+      </div>
+      <div class="grid2">
+        <label>CORE 场景文件路径<input id="g_corefile" placeholder="如 /home/user/scenario.imn"></label>
+        <label>lagsim 配置文件路径<input id="g_lagsimfile" placeholder="留空则尝试 lagsim list/profiles"></label>
+      </div>
+      <div class="btnrow">
+        <button onclick="checkHost('shaper')">测试 SSH 连接</button>
+        <span class="hint">供"实验设计→从CORE/lagsim导入参数"读取参数用</span>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>一键准备环境</h2>
       <p class="hint">检查/安装路由器与 VPS 上的 iperf3，并在 VPS 启动 iperf3 服务端（需 VPS 防火墙放行 UDP 端口，通常为 5201）。</p>
       <button class="primary" onclick="prepareEnv()">检查并准备</button>
@@ -102,9 +123,27 @@ if (!window.echarts) __ensureCharts();
         <h2>实验组设计（可多组，用于对比）</h2>
         <div>
           <button onclick="addGroup()">+ 添加实验组</button>
+          <button onclick="importParams('core')" title="SSH到整形网关读CORE场景文件并生成实验组">从CORE导入参数</button>
+          <button onclick="importParams('lagsim')" title="SSH到整形网关读lagsim配置并生成实验组">从lagsim导入参数</button>
           <button class="primary" onclick="saveGroups()">保存设计</button>
         </div>
       </div>
+      <details style="margin:8px 0">
+        <summary class="hint" style="cursor:pointer">或：粘贴 CORE/lagsim 配置文本导入</summary>
+        <div class="grid2" style="margin-top:8px">
+          <label>类型<select id="impKind">
+            <option value="core">CORE 场景文本</option>
+            <option value="lagsim">lagsim 配置文本</option>
+          </select></label>
+          <label>接口顺序<select id="impIfaces" multiple size="3">
+            <option value="lan1" selected>lan1</option>
+            <option value="lan2" selected>lan2</option>
+            <option value="lan3" selected>lan3</option>
+          </select></label>
+        </div>
+        <textarea id="impText" rows="6" style="width:100%;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;font:12px Consolas,monospace" placeholder="把 CORE 的 .imn/XML 内容或 lagsim 的配置/profiles 输出粘贴到这里"></textarea>
+        <div class="btnrow"><button onclick="importParams('paste')">导入粘贴文本</button></div>
+      </details>
       <div id="groupsEditor"></div>
     </div>
   </section>

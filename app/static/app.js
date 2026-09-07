@@ -43,13 +43,18 @@ document.querySelectorAll(".tab").forEach((btn) => {
 async function loadConfig() {
   try {
     CONFIG = await api("/api/config");
-    const r = CONFIG.router || {}, v = CONFIG.vps || {}, i = CONFIG.iperf3 || {};
+    const r = CONFIG.router || {}, v = CONFIG.vps || {}, i = CONFIG.iperf3 || {}, g = CONFIG.shaper || {};
     $("r_host").value = r.host || ""; $("r_port").value = r.port || 22;
     $("r_user").value = r.user || "root"; $("r_pass").value = r.password || "";
     $("r_sudo").checked = !!r.use_sudo;
     $("v_host").value = v.host || ""; $("v_port").value = v.port || 22;
     $("v_user").value = v.user || "root"; $("v_pass").value = v.password || "";
     $("v_sudo").checked = !!v.use_sudo;
+    $("g_host").value = g.host || ""; $("g_port").value = g.port || 22;
+    $("g_user").value = g.user || "root"; $("g_pass").value = g.password || "";
+    $("g_sudo").checked = !!g.use_sudo;
+    $("g_corefile").value = g.core_file || "";
+    $("g_lagsimfile").value = g.lagsim_file || "";
     $("i_port").value = i.port || 5201;
     $("i_mptcp").checked = i.mptcp !== false;
     GROUPS = (CONFIG.groups || []).slice();
@@ -69,6 +74,13 @@ function collectConfigFromForm() {
       host: $("v_host").value.trim(), port: parseInt($("v_port").value) || 22,
       user: $("v_user").value.trim(), password: $("v_pass").value,
       use_sudo: $("v_sudo").checked,
+    },
+    shaper: {
+      host: $("g_host").value.trim(), port: parseInt($("g_port").value) || 22,
+      user: $("g_user").value.trim(), password: $("g_pass").value,
+      use_sudo: $("g_sudo").checked,
+      core_file: $("g_corefile").value.trim(),
+      lagsim_file: $("g_lagsimfile").value.trim(),
     },
     iperf3: { port: parseInt($("i_port").value) || 5201, mptcp: $("i_mptcp").checked, udp_bitrate_mbps: 0 },
     groups: GROUPS,
@@ -257,6 +269,32 @@ function onGeInput(ev) {
       else if (f === "loss_pct") l.loss_pct = +el.value;
     }
   }
+}
+
+async function importParams(mode) {
+  try {
+    await saveFormConfig();
+    let body;
+    if (mode === "paste") {
+      const kind = $("impKind").value;
+      const raw = $("impText").value;
+      if (!raw.trim()) { log("warn", "请先粘贴配置文本"); return; }
+      body = { kind, raw };
+    } else {
+      body = { kind: mode, fetch: true };
+    }
+    const sel = [...$("impIfaces").selectedOptions].map((o) => o.value);
+    if (sel.length) body.ifaces = sel;
+    const r = await api("/api/import", { method: "POST", body: JSON.stringify(body) });
+    if (!r.group) { log("error", r.error || "导入失败"); return; }
+    const g = r.group;
+    const same = GROUPS.findIndex((x) => x.name === g.name);
+    if (same >= 0) GROUPS[same] = g; else GROUPS.push(g);
+    renderGroups();
+    renderGroupSelector();
+    await saveGroups();
+    log("info", `导入成功，生成实验组 [${g.name}]，请核对参数后运行`);
+  } catch (e) { log("error", "导入失败: " + e.message); }
 }
 
 async function saveGroups() {
