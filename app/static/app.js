@@ -54,7 +54,9 @@ async function loadConfig() {
     $("g_user").value = g.user || "root"; $("g_pass").value = g.password || "";
     $("g_sudo").checked = !!g.use_sudo;
     $("g_corefile").value = g.core_file || "";
-    $("g_lagsimfile").value = g.lagsim_file || "";
+    const dn = CONFIG.vps_downlink || {};
+    $("v_dn_en").checked = !!dn.enabled;
+    $("v_dn_map").value = Object.entries(dn.map || {}).map(([k, v]) => `${k}=${v}`).join("\n");
     $("i_port").value = i.port || 5201;
     $("i_mptcp").checked = i.mptcp !== false;
     GROUPS = (CONFIG.groups || []).slice();
@@ -80,9 +82,9 @@ function collectConfigFromForm() {
       user: $("g_user").value.trim(), password: $("g_pass").value,
       use_sudo: $("g_sudo").checked,
       core_file: $("g_corefile").value.trim(),
-      lagsim_file: $("g_lagsimfile").value.trim(),
     },
     iperf3: { port: parseInt($("i_port").value) || 5201, mptcp: $("i_mptcp").checked, udp_bitrate_mbps: 0 },
+    vps_downlink: parseDownlinkMap(),
     groups: GROUPS,
   };
 }
@@ -183,18 +185,27 @@ function renderGroups() {
         ? "CORE整形模式：程序跳过 tc，限速/时延/丢包仅作参考用于计算效率（不会实际整形）"
         : ""}</span>
       <table class="ge-links">
-        <thead><tr><th>启用</th><th>链路名</th><th>接口</th><th>限速 Mbps</th>
-        <th>时延 ms</th><th>抖动 ms</th><th>丢包 %</th><th></th></tr></thead>
+        <thead><tr>
+          <th rowspan="2">启用</th><th rowspan="2">链路名</th><th rowspan="2">接口</th>
+          <th colspan="4">上行参数</th><th colspan="4">下行参数(独立下行整形时用)</th><th rowspan="2"></th>
+        </tr><tr>
+          <th>限速M</th><th>时延ms</th><th>抖动ms</th><th>丢包%</th>
+          <th>限速M</th><th>时延ms</th><th>抖动ms</th><th>丢包%</th>
+        </tr></thead>
         <tbody>
           ${(g.links || []).map((l, li) => `
           <tr data-gi="${gi}" data-li="${li}">
             <td><input type="checkbox" ${l.enabled ? "checked" : ""} data-f="enabled"></td>
-            <td><input type="text" value="${esc(l.label)}" style="width:80px" data-f="label"></td>
+            <td><input type="text" value="${esc(l.label)}" style="width:70px" data-f="label"></td>
             <td><select data-f="iface">${ifaceOptions(l.iface)}</select></td>
-            <td><input type="number" value="${l.rate_mbps || 0}" min="0" style="width:90px" data-f="rate_mbps"></td>
-            <td><input type="number" value="${l.delay_ms || 0}" min="0" style="width:80px" data-f="delay_ms"></td>
-            <td><input type="number" value="${l.jitter_ms || 0}" min="0" style="width:80px" data-f="jitter_ms"></td>
-            <td><input type="number" value="${l.loss_pct || 0}" min="0" step="0.1" style="width:80px" data-f="loss_pct"></td>
+            <td><input type="number" value="${l.rate_mbps || 0}" min="0" style="width:80px" data-f="rate_mbps"></td>
+            <td><input type="number" value="${l.delay_ms || 0}" min="0" style="width:70px" data-f="delay_ms"></td>
+            <td><input type="number" value="${l.jitter_ms || 0}" min="0" style="width:70px" data-f="jitter_ms"></td>
+            <td><input type="number" value="${l.loss_pct || 0}" min="0" step="0.1" style="width:70px" data-f="loss_pct"></td>
+            <td><input type="number" value="${l.dl_rate_mbps != null ? l.dl_rate_mbps : (l.rate_mbps || 0)}" min="0" style="width:80px" data-f="dl_rate_mbps"></td>
+            <td><input type="number" value="${l.dl_delay_ms != null ? l.dl_delay_ms : (l.delay_ms || 0)}" min="0" style="width:70px" data-f="dl_delay_ms"></td>
+            <td><input type="number" value="${l.dl_jitter_ms != null ? l.dl_jitter_ms : (l.jitter_ms || 0)}" min="0" style="width:70px" data-f="dl_jitter_ms"></td>
+            <td><input type="number" value="${l.dl_loss_pct != null ? l.dl_loss_pct : (l.loss_pct || 0)}" min="0" step="0.1" style="width:70px" data-f="dl_loss_pct"></td>
             <td><button onclick="delLink(${gi},${li})" class="danger">×</button></td>
           </tr>`).join("")}
         </tbody>
@@ -267,8 +278,21 @@ function onGeInput(ev) {
       else if (f === "delay_ms") l.delay_ms = +el.value;
       else if (f === "jitter_ms") l.jitter_ms = +el.value;
       else if (f === "loss_pct") l.loss_pct = +el.value;
+      else if (f === "dl_rate_mbps") l.dl_rate_mbps = +el.value;
+      else if (f === "dl_delay_ms") l.dl_delay_ms = +el.value;
+      else if (f === "dl_jitter_ms") l.dl_jitter_ms = +el.value;
+      else if (f === "dl_loss_pct") l.dl_loss_pct = +el.value;
     }
   }
+}
+
+function parseDownlinkMap() {
+  const map = {};
+  ($("v_dn_map").value || "").split(/\r?\n|[,;]/).forEach((line) => {
+    const m = line.trim().split(/\s*=\s*/);
+    if (m.length === 2 && m[0].trim()) map[m[0].trim()] = m[1].trim();
+  });
+  return { enabled: $("v_dn_en").checked, map };
 }
 
 async function importParams(mode) {
@@ -563,13 +587,13 @@ function renderRunsTable() {
       <td style="cursor:grab">${groupNo(r)}</td><td>${esc(r.ts)}</td><td title="${esc(r.group_name)}">${esc((r.group_name || "").slice(0, 22))}</td>
       <td>${r.shaping === "core" ? "CORE" : "程序tc"}</td>
       <td>${(r.protocol || "tcp").toUpperCase()}</td>
-      <td>${r.theory_mbps}</td>
+      <td>${r.theory_mbps}</td><td>${r.theory_down_mbps != null ? r.theory_down_mbps : r.theory_mbps}</td>
       <td class="up">${mb(r.upload_mbps)}</td><td class="dn">${mb(r.download_mbps)}</td>
       <td>${r.efficiency_up_pct}</td><td>${r.efficiency_down_pct}</td>
       <td>${r.retransmits}</td><td>${r.jitter_ms}</td><td>${r.lost_pct}</td>
       <td>${r.recovery_sec == null ? "-" : r.recovery_sec + "s"}</td>
       <td><button class="danger" style="padding:2px 8px" onclick="event.stopPropagation();deleteRun(${r.id},${i})">删除</button></td>
-    </tr>`).join("") || '<tr><td colspan="16" class="hint">暂无结果</td></tr>';
+    </tr>`).join("") || '<tr><td colspan="17" class="hint">暂无结果</td></tr>';
   const all = tb.querySelectorAll(".rowsel");
   const chk = $("selAll");
   if (chk) { chk.checked = all.length > 0 && all.length === [...all].filter((c) => c.checked).length; chk.indeterminate = all.length > 0 && chk.checked === false && [...all].some((c) => c.checked); }

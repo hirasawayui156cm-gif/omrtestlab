@@ -22,7 +22,23 @@ class Runner:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._ssh: SSH | None = None
+        self._vps_ssh: SSH | None = None
+        self._vps_shaped: list[str] = []
         self._did_shape = False
+
+    def _ensure_vps(self):
+        if self._vps_ssh:
+            return
+        v = self.config.get("vps", {})
+        if not v.get("host"):
+            self._log("warn", "未配置 VPS SSH，无法做下行整形")
+            return
+        try:
+            self._vps_ssh = SSH(v.get("host"), v.get("port", 22), v.get("user"),
+                                v.get("password", ""), use_sudo=v.get("use_sudo", False))
+        except Exception as exc:
+            self._log("warn", f"连接 VPS(下行整形)失败: {exc}")
+            self._vps_ssh = None
 
     # ---------- 事件 ----------
     def _emit(self, etype: str, **kw):
@@ -59,6 +75,20 @@ class Runner:
                     self._ssh.run(c, timeout=10)
                 except Exception:
                     pass
+        if self._vps_shaped and self._vps_ssh:
+            for viface in self._vps_shaped:
+                for c in tc.clear_link_cmds(viface):
+                    try:
+                        self._vps_ssh.run(c, timeout=10)
+                    except Exception:
+                        pass
+            self._vps_shaped = []
+        if self._vps_ssh:
+            try:
+                self._vps_ssh.close()
+            except Exception:
+                pass
+            self._vps_ssh = None
         if self._ssh:
             try:
                 self._ssh.close()
@@ -111,6 +141,15 @@ class Runner:
             except Exception as exc:
                 self._log("warn", f"恢复 mptcp 默认失败: {exc}")
             self._did_shape = False
+        # 清除 VPS 侧下行整形
+        if self._vps_shaped and self._vps_ssh:
+            for viface in self._vps_shaped:
+                for c in tc.clear_link_cmds(viface):
+                    try:
+                        self._vps_ssh.run(c, timeout=10)
+                    except Exception:
+                        pass
+            self._vps_shaped = []
 
     def _run_group(self, group: dict, gi: int, total: int) -> dict | None:
         cfg = self.config
@@ -130,6 +169,12 @@ class Runner:
         if not server:
             self._log("error", "[group] 未配置 VPS 地址，跳过。")
             return None
+        # 补全下行参数：未单独设置时默认=上行参数
+        for l in links:
+            for k, dk in (("rate_mbps", "dl_rate_mbps"), ("delay_ms", "dl_delay_ms"),
+                          ("jitter_ms", "dl_jitter_ms"), ("loss_pct", "dl_loss_pct")):
+                if l.get(dk) is None:
+                    l[dk] = l.get(k, 0)
 
         ifaces = [l["iface"] for l in links]
         cfg["last_links"] = ifaces
@@ -152,6 +197,26 @@ class Runner:
                 self._log("info", f"  → {l['iface']} 限速={l.get('rate_mbps') or '无'}Mbit "
                                   f"时延={l.get('delay_ms',0)}ms 抖动={l.get('jitter_ms',0)}ms "
                                   f"丢包={l.get('loss_pct',0)}%")
+            # 下行整形：在 VPS 对应出口打同样的 tc（双向同参数）
+            dn = cfg.get("vps_downlink") or {}
+            dn_map = dn.get("map") or {}
+            if dn.get("enabled") and any(dn_map.get(l["iface"]) for l in links):
+                self._ensure_vps()
+                if self._vps_ssh:
+                    self._log("info", f"[{group['name']}] 下行整形（VPS 出口）:")
+                    self._vps_shaped = []
+                    for l in links:
+                        viface = dn_map.get(l["iface"])
+                        if not viface:
+                            self._log("warn", f"  {l['iface']} 无映射，跳过下行整形")
+                            continue
+                        cmds = tc.apply_link_cmds(viface, l.get("dl_rate_mbps"), l.get("dl_delay_ms", 0),
+                                                  l.get("dl_jitter_ms", 0), l.get("dl_loss_pct", 0))
+                        for c in cmds:
+                            rc, out, err = self._vps_ssh.run(c, timeout=15)
+                            self._log("info" if rc == 0 else "warn",
+                                      f"  {viface}: {c} " + ("ok" if rc == 0 else f"rc={rc} {err.strip()[:100]}"))
+                        self._vps_shaped.append(viface)
             time.sleep(1.0)
         else:
             self._log("info", f"[{group['name']}] CORE整形模式：跳过 tc，"
@@ -167,6 +232,7 @@ class Runner:
 
         # 3) 吞吐实时监控（覆盖整段测速）
         theory_mbps = sum(float(l.get("rate_mbps") or 0) for l in links) or 0
+        theory_down_mbps = sum(float(l.get("dl_rate_mbps") or 0) for l in links) or 0
         monitor_total = duration * 2 + 6 if not udp else duration + 6
         live_accum = {"up": [], "down": []}
         monitor = ThroughputMonitor(self._ssh, ifaces, monitor_total,
@@ -240,10 +306,11 @@ class Runner:
             "protocol": protocol,
             "links": links,
             "theory_mbps": round(theory_mbps, 3),
+            "theory_down_mbps": round(theory_down_mbps, 3),
             "upload_mbps": round(up_mbps, 3),
             "download_mbps": round(down_mbps, 3),
             "efficiency_up_pct": round(up_mbps / theory_mbps * 100, 1) if theory_mbps else 0,
-            "efficiency_down_pct": round(down_mbps / theory_mbps * 100, 1) if theory_mbps else 0,
+            "efficiency_down_pct": round(down_mbps / theory_down_mbps * 100, 1) if theory_down_mbps else 0,
             "retransmits": (up or {}).get("retransmits", 0),
             "jitter_ms": (up or {}).get("jitter_ms", 0),
             "lost_pct": (up or {}).get("lost_pct", 0),

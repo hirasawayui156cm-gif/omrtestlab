@@ -1,10 +1,10 @@
-"""从 CORE 场景 / lagsim 配置文本中解析每路弱网参数。
+"""从 CORE 场景配置文本中解析每路弱网参数。
 
 返回统一结构:
     [{"rate_mbps": float|None, "delay_ms": float|None,
       "jitter_ms": float|None, "loss_pct": float|None}, ...]
 
-解析是"尽力而为"的：不同版本的 CORE/lagsim 格式不同，若解析不准，
+解析是"尽力而为"的：不同版本的 CORE 格式不同，若解析不准，
 导入后的数值会在界面上可直接手改（导入只做预填）。
 """
 from __future__ import annotations
@@ -88,14 +88,33 @@ def _find_links(text: str) -> list[str]:
     return blocks
 
 
+def _num_list(line: str) -> list[float]:
+    """提取一行里的数值：支持标量 'delay 20000' 或矢量 'bandwidth {a b}'。"""
+    b = re.search(r"\{\s*([^}]*)\}", line)
+    if b:
+        return [float(x) for x in re.findall(r"[\d.]+", b.group(1))]
+    m = re.search(r"[\d.]+", line)
+    return [float(m.group())] if m else []
+
+
+def _to_rate(v: float) -> float | None:
+    return v / 1_000_000.0  # 文本格式 bandwidth 单位为 bps
+
+
+def _to_ms(v: float) -> float:
+    return v / 1000.0  # 文本格式 delay/jitter 单位为微秒
+
+
 def _parse_core_text_links(text: str) -> list[dict]:
-    """解析 CORE 文本(.imn)格式的 link 块。
+    """解析 CORE 文本(.imn)格式的 link 块（支持标量/不对称矢量）。
 
     示例:
         link l2 {
-            delay 20000        # 微秒 → 20ms
+            delay {5000 5000}        # 双向 5ms（微秒）
             nodes {n5 n1}
-            bandwidth 100000000  # bps → 100M
+            bandwidth {100000000 30000000}  # bps，不对称 100M/30M
+            jitter {1000 1000}
+            loss {0.1 0.05}
         }
     """
     lanes = []
@@ -106,29 +125,27 @@ def _parse_core_text_links(text: str) -> list[dict]:
             cur = {}
             continue
         if cur is not None:
-            for key, pat in (("rate", r"^(?:bandwidth|rate|bw)\s+([\d.]+)\s*(\S*)$"),
-                             ("delay", r"^delay\s+([\d.]+)\s*(\S*)$"),
-                             ("jitter", r"^jitter\s+([\d.]+)\s*(\S*)$"),
-                             ("loss", r"^loss\s+([\d.]+)\s*(\S*)$")):
-                m = re.match(pat, s, re.I)
-                if m and key not in cur:
-                    cur[key] = {"num": float(m.group(1)), "unit": (m.group(2) or "")}
+            m = re.match(r"^(bandwidth|rate|bw|delay|jitter|loss|ber)\b", s, re.I)
+            if m:
+                key = m.group(1).lower()
+                if key in ("bandwidth", "rate", "bw"):
+                    key = "rate"
+                elif key == "ber":
+                    key = "loss"
+                if key not in cur:
+                    cur[key] = _num_list(s)
             if s == "}":
-                if any(k in cur for k in ("rate", "delay", "jitter", "loss")):
-                    r = cur.get("rate")
-                    d = cur.get("delay")
-                    j = cur.get("jitter")
-                    lo = cur.get("loss")
-                    rate = _normalize_rate((str(r["num"]) + r["unit"]) if r else None)
-                    # 文本格式 delay/jitter 单位为微秒
-                    d_ms = (d["num"] / 1000.0) if d else None
-                    if d and d["unit"]:
-                        d_ms = _normalize_ms(str(d["num"]) + d["unit"])
-                    j_ms = (j["num"] / 1000.0) if j else None
-                    if j and j["unit"]:
-                        j_ms = _normalize_ms(str(j["num"]) + j["unit"])
-                    lanes.append({"rate_mbps": rate, "delay_ms": d_ms,
-                                  "jitter_ms": j_ms, "loss_pct": (lo["num"] if lo else None)})
+                lane = {}
+                for k, cv in (("rate", _to_rate), ("delay", _to_ms),
+                              ("jitter", _to_ms), ("loss", lambda x: x)):
+                    if k in cur and cur[k]:
+                        lane[k + "_mbps" if k == "rate" else
+                             (k + "_ms" if k in ("delay", "jitter") else k + "_pct")] = cv(cur[k][0])
+                        if len(cur[k]) > 1:  # 不对称：保留第二方向供参考
+                            lane["asym"] = True
+                            lane.setdefault("extra", {})[k] = cur[k]
+                if lane:
+                    lanes.append(lane)
                 cur = None
     return lanes
 
@@ -158,41 +175,3 @@ def _parse_xml_links(text: str) -> list[dict]:
         })
     return lanes
 
-
-def _split_blocks(text: str) -> list[str]:
-    parts = re.split(r"\n\s*\n|(?=^[ \t]*\[?[A-Za-z0-9_ -]{2,40}\]?\s*[:{])", text, flags=re.M)
-    return [p for p in parts if p.strip()]
-
-
-def parse_lagsim_lanes(text: str) -> list[dict]:
-    """尽力解析 lagsim 的配置/profiles 文本，把每段数值提取成一路参数。"""
-    lanes = []
-    for blk in _split_blocks(text):
-        line = blk.lower()
-        if any(kw in line for kw in ("profile", "apply", "rule", "client", "interface")):
-            lanes.append(_extract_lane(blk))
-    if not lanes:
-        lanes.append(_extract_lane(text))
-    return lanes
-
-
-def _extract_lane(blk: str) -> dict:
-    def _by_keywords(keys):
-        best = None
-        for line in blk.splitlines():
-            low = line.lower()
-            for k in keys:
-                if k in low:
-                    val = re.sub(r"^[^=:]*[=:]\s*", "", line).strip()
-                    if val and not val.lower().startswith(("true", "false", "yes", "no")):
-                        best = val
-                        break
-            if best:
-                break
-        return best
-
-    rate = _normalize_rate(_by_keywords(_KW_BW))
-    delay = _normalize_ms(_by_keywords(_KW_DELAY))
-    jitter = _normalize_ms(_by_keywords(_KW_JITTER))
-    loss = _normalize_loss(_by_keywords(_KW_LOSS))
-    return {"rate_mbps": rate, "delay_ms": delay, "jitter_ms": jitter, "loss_pct": loss}

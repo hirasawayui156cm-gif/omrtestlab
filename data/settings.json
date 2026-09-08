@@ -19,62 +19,76 @@
     "user": "u",
     "password": "1",
     "use_sudo": false,
-    "core_file": "/root/.core/configs/a1.imn",
-    "lagsim_file": ""
+    "core_file": "/root/.core/configs/a1.imn"
   },
   "iperf3": {
     "port": 5201,
     "mptcp": true,
     "udp_bitrate_mbps": 0
   },
+  "vps_downlink": {
+    "enabled": true,
+    "map": {
+      "lan1": "ens36",
+      "lan2": "ens35",
+      "lan3": "ens34"
+    }
+  },
   "groups": [
     {
-      "name": "tc带宽100/50/50",
-      "duration": 10,
+      "name": "5G/5G/5G",
+      "gid": "E",
+      "duration": 15,
       "protocol": "tcp",
       "udp_bitrate_mbps": 0,
+      "shaping": "core",
       "links": [
         {
-          "label": "链路1",
+          "label": "链路1(lan1)",
           "iface": "lan1",
           "rate_mbps": 100,
-          "delay_ms": 20,
-          "jitter_ms": 0,
-          "loss_pct": 0,
+          "delay_ms": 5,
+          "jitter_ms": 1,
+          "loss_pct": 0.1,
+          "dl_rate_mbps": 300,
+          "dl_delay_ms": 5,
+          "dl_jitter_ms": 1,
+          "dl_loss_pct": 0.05,
           "enabled": true
         },
         {
-          "label": "链路2",
+          "label": "链路2(lan2)",
           "iface": "lan2",
-          "rate_mbps": 50,
-          "delay_ms": 20,
-          "jitter_ms": 0,
-          "loss_pct": 0,
+          "rate_mbps": 100,
+          "delay_ms": 5,
+          "jitter_ms": 1,
+          "loss_pct": 0.1,
+          "dl_rate_mbps": 300,
+          "dl_delay_ms": 5,
+          "dl_jitter_ms": 1,
+          "dl_loss_pct": 0.05,
           "enabled": true
         },
         {
-          "label": "链路3",
+          "label": "链路3(lan3)",
           "iface": "lan3",
-          "rate_mbps": 50,
-          "delay_ms": 20,
-          "jitter_ms": 0,
-          "loss_pct": 0,
+          "rate_mbps": 100,
+          "delay_ms": 5,
+          "jitter_ms": 1,
+          "loss_pct": 0.1,
+          "dl_rate_mbps": 300,
+          "dl_delay_ms": 5,
+          "dl_jitter_ms": 1,
+          "dl_loss_pct": 0.05,
           "enabled": true
         }
       ],
       "break": {
         "enabled": false,
         "iface": "lan1",
-        "at_sec": 5,
-        "restore_sec": 2
-      },
-      "shaping": "program",
-      "gid": "E0"
+        "at_sec": 0,
+        "restore_sec": 5
+      }
     }
-  ],
-  "last_links": [
-    "lan1",
-    "lan2",
-    "lan3"
   ]
 }

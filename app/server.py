@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import iperf
 from .config import BASE_DIR, load_config, save_config
-from .importer import parse_core_links, parse_lagsim_lanes
+from .importer import parse_core_links
 from .runner import Runner
 from .ssh import SSH
 from .storage import Storage
@@ -172,15 +172,16 @@ def prepare():
 
 @app.post("/api/import")
 def import_params(body: dict):
-    """从 CORE/lagsim 导入参数 → 生成一个"外部整形"实验组。
+    """从 CORE 场景导入参数 → 生成一个"外部整形"实验组。
 
-    body: {kind:'core'|'lagsim', raw?:文本(直接粘贴), fetch?:true(SSH电脑C读文件)}
+    body: {kind:'core', raw?:文本(直接粘贴), fetch?:true(SSH整形网关读场景文件)}
     """
     kind = body.get("kind", "core")
-    lanes = []
+    if kind != "core":
+        return {"ok": False, "error": "仅支持从 CORE 导入"}
     raw = body.get("raw")
     if raw is not None:
-        lanes = parse_core_links(raw) if kind == "core" else parse_lagsim_lanes(raw)
+        lanes = parse_core_links(raw)
     elif body.get("fetch"):
         sh = CONFIG.get("shaper", {})
         if not sh.get("host"):
@@ -189,22 +190,14 @@ def import_params(body: dict):
             ssh = _ssh_for("shaper")
         except Exception as exc:
             return {"ok": False, "error": f"连接整形网关失败: {exc}"}
-        f = (sh.get("core_file") if kind == "core" else sh.get("lagsim_file")) or ""
-        if f:
-            rc, out, err = ssh.run(f"cat {f}")
-            raw = out or err
-            ssh.close()
-        else:
-            # 没有配置文件路径时，尝试从 lagsim 命令输出读取
-            if kind == "lagsim":
-                rc, out, _ = ssh.run("lagsim list 2>&1; echo ===; lagsim profiles 2>&1")
-                raw = out
-                ssh.close()
-            else:
-                ssh.close()
-                return {"ok": False, "error": "未配置 CORE 场景文件路径(core_file)，请填写或改用文本粘贴导入"}
+        f = sh.get("core_file") or ""
+        if not f:
+            return {"ok": False, "error": "未配置 CORE 场景文件路径(core_file)，请填写或改用文本粘贴导入"}
+        rc, out, err = ssh.run(f"cat {f}")
+        raw = out or err
+        ssh.close()
         if raw:
-            lanes = parse_core_links(raw) if kind == "core" else parse_lagsim_lanes(raw)
+            lanes = parse_core_links(raw)
     else:
         return {"ok": False, "error": "需要 raw(粘贴文本) 或 fetch(SSH读取)"}
 
@@ -215,6 +208,13 @@ def import_params(body: dict):
     # 映射到 BPI 链路接口（可按 body.ifaces 覆盖）
     ifaces = (body.get("ifaces") or ["lan1", "lan2", "lan3"])[: len(lanes)]
     links = []
+
+    def _dl_val(lane, key, conv, fallback):
+        extra = (lane.get("extra") or {}).get(key)
+        if extra and len(extra) > 1:
+            return conv(extra[1])
+        return fallback
+
     for idx, (iface, lane) in enumerate(zip(ifaces, lanes)):
         links.append({
             "label": f"链路{idx + 1}({iface})",
@@ -223,11 +223,16 @@ def import_params(body: dict):
             "delay_ms": round(lane.get("delay_ms") or 0, 3),
             "jitter_ms": round(lane.get("jitter_ms") or 0, 3),
             "loss_pct": round(lane.get("loss_pct") or 0, 3),
+            "dl_rate_mbps": round(_dl_val(lane, "rate", lambda v: v / 1e6, lane.get("rate_mbps") or 0), 3),
+            "dl_delay_ms": round(_dl_val(lane, "delay", lambda v: v / 1000.0, lane.get("delay_ms") or 0), 3),
+            "dl_jitter_ms": round(_dl_val(lane, "jitter", lambda v: v / 1000.0, lane.get("jitter_ms") or 0), 3),
+            "dl_loss_pct": round(_dl_val(lane, "loss", lambda v: v, lane.get("loss_pct") or 0), 3),
             "enabled": True,
         })
     theory = sum(l["rate_mbps"] for l in links)
+    theory_dn = sum(l["dl_rate_mbps"] for l in links)
     group = {
-        "name": f"导入-{'CORE' if kind == 'core' else 'lagsim'}-{len(links)}路(th={theory:.0f}M)",
+        "name": f"导入-CORE-{len(links)}路(th={theory:.0f}M/th下{theory_dn:.0f}M)",
         "gid": "",
         "duration": 15, "protocol": "tcp", "udp_bitrate_mbps": 0,
         "shaping": "core",
@@ -335,7 +340,7 @@ def export(fmt: str = "csv", ids: str = ""):
             headers={"Content-Disposition": "attachment; filename=omr_results.json"})
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["ID", "时间", "实验组", "整形", "协议", "时长s", "理论Mbps",
+    writer.writerow(["ID", "时间", "实验组", "整形", "协议", "时长s", "理论Mbps", "理论下Mbps",
                      "上行Mbps", "下行Mbps", "上行效率%", "下行效率%",
                      "重传", "抖动ms", "丢包%", "恢复时间s"])
     for r in runs:
@@ -343,6 +348,7 @@ def export(fmt: str = "csv", ids: str = ""):
             r.get("gid") or r.get("id"), r.get("ts"), r.get("group_name"),
             "程序tc" if r.get("shaping") != "core" else "CORE",
             r.get("protocol"), r.get("duration"), r.get("theory_mbps"),
+            r.get("theory_down_mbps") or r.get("theory_mbps"),
             r.get("upload_mbps"), r.get("download_mbps"),
             r.get("efficiency_up_pct"), r.get("efficiency_down_pct"),
             r.get("retransmits"), r.get("jitter_ms"), r.get("lost_pct"),
@@ -368,7 +374,9 @@ def _chart_rows(ids: str = "") -> list[dict]:
             "ID": r.get("gid") or r.get("id"), "时间": r.get("ts"), "实验组": r.get("group_name"),
             "整形": "程序tc" if r.get("shaping") != "core" else "CORE",
             "协议": r.get("protocol"), "时长s": r.get("duration"),
-            "理论Mbps": r.get("theory_mbps"), "上行Mbps": r.get("upload_mbps"),
+            "理论Mbps": r.get("theory_mbps"),
+            "理论下Mbps": r.get("theory_down_mbps") or r.get("theory_mbps"),
+            "上行Mbps": r.get("upload_mbps"),
             "下行Mbps": r.get("download_mbps"),
             "上行效率%": r.get("efficiency_up_pct"), "下行效率%": r.get("efficiency_down_pct"),
             "重传": r.get("retransmits"), "抖动ms": r.get("jitter_ms"), "丢包%": r.get("lost_pct"),

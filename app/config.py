@@ -12,8 +12,9 @@ DEFAULT_CONFIG = {
     "router": {"host": "", "port": 22, "user": "root", "password": "", "use_sudo": False},
     "vps": {"host": "", "port": 22, "user": "root", "password": "", "use_sudo": False},
     "shaper": {"host": "", "port": 22, "user": "root", "password": "", "use_sudo": False,
-               "core_file": "", "lagsim_file": ""},
+               "core_file": ""},
     "iperf3": {"port": 5201, "udp_bitrate_mbps": 0, "mptcp": True},
+    "vps_downlink": {"enabled": False, "map": {"lan1": "ens36", "lan2": "ens35", "lan3": "ens34"}},
     "last_links": [],
     "result_order": [],
     "groups": [

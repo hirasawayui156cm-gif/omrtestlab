@@ -88,7 +88,19 @@ if (!window.echarts) __ensureCharts();
     </div>
 
     <div class="card">
-      <h2>整形网关（电脑C，跑 CORE / lagsim）</h2>
+      <h2>程序tc 下行整形（在 VPS 出口对每条 WAN 打 tc）</h2>
+      <div class="btnrow">
+        <label class="chk"><input type="checkbox" id="v_dn_en"> 启用下行整形（上行仍在 BPI 出口打，下行在 VPS 出口打，实现双向同参数）</label>
+      </div>
+      <label>接口映射（每行一条：BPI接口=VPS接口）
+        <textarea id="v_dn_map" rows="3" style="width:100%;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;font:12px Consolas,monospace">lan1=ens36
+lan2=ens35
+lan3=ens34</textarea>
+      </label>
+    </div>
+
+    <div class="card">
+      <h2>整形网关（电脑C，跑 CORE）</h2>
       <div class="grid3">
         <label>主机地址<input id="g_host" placeholder="电脑C的IP"></label>
         <label>SSH 端口<input id="g_port" type="number" value="22"></label>
@@ -99,12 +111,11 @@ if (!window.echarts) __ensureCharts();
         <label class="chk"><input type="checkbox" id="g_sudo"> 使用 sudo 执行</label>
       </div>
       <div class="grid2">
-        <label>CORE 场景文件路径<input id="g_corefile" placeholder="如 /home/user/scenario.imn"></label>
-        <label>lagsim 配置文件路径<input id="g_lagsimfile" placeholder="留空则尝试 lagsim list/profiles"></label>
+        <label>CORE 场景文件路径<input id="g_corefile" placeholder="如 /root/.core/scenario.imn"></label>
       </div>
       <div class="btnrow">
         <button onclick="checkHost('shaper')">测试 SSH 连接</button>
-        <span class="hint">供"实验设计→从CORE/lagsim导入参数"读取参数用</span>
+        <span class="hint">供"实验设计→从CORE导入参数"读取参数用</span>
       </div>
     </div>
 
@@ -124,16 +135,14 @@ if (!window.echarts) __ensureCharts();
         <div>
           <button onclick="addGroup()">+ 添加实验组</button>
           <button onclick="importParams('core')" title="SSH到整形网关读CORE场景文件并生成实验组">从CORE导入参数</button>
-          <button onclick="importParams('lagsim')" title="SSH到整形网关读lagsim配置并生成实验组">从lagsim导入参数</button>
           <button class="primary" onclick="saveGroups()">保存设计</button>
         </div>
       </div>
       <details style="margin:8px 0">
-        <summary class="hint" style="cursor:pointer">或：粘贴 CORE/lagsim 配置文本导入</summary>
+        <summary class="hint" style="cursor:pointer">或：粘贴 CORE 配置文本导入</summary>
         <div class="grid2" style="margin-top:8px">
           <label>类型<select id="impKind">
             <option value="core">CORE 场景文本</option>
-            <option value="lagsim">lagsim 配置文本</option>
           </select></label>
           <label>接口顺序<select id="impIfaces" multiple size="3">
             <option value="lan1" selected>lan1</option>
@@ -141,7 +150,7 @@ if (!window.echarts) __ensureCharts();
             <option value="lan3" selected>lan3</option>
           </select></label>
         </div>
-        <textarea id="impText" rows="6" style="width:100%;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;font:12px Consolas,monospace" placeholder="把 CORE 的 .imn/XML 内容或 lagsim 的配置/profiles 输出粘贴到这里"></textarea>
+        <textarea id="impText" rows="6" style="width:100%;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;font:12px Consolas,monospace" placeholder="把 CORE 的 .imn/XML 内容粘贴到这里"></textarea>
         <div class="btnrow"><button onclick="importParams('paste')">导入粘贴文本</button></div>
       </details>
       <div id="groupsEditor"></div>
@@ -209,7 +218,7 @@ if (!window.echarts) __ensureCharts();
         <table id="runsTable" class="runs">
           <thead>
             <tr>
-              <th><input type="checkbox" id="selAll" checked title="全选/全不选" onclick="selectAllRows(this.checked)"></th><th>#</th><th>时间</th><th>实验组</th><th>整形</th><th>协议</th><th>理论M</th>
+              <th><input type="checkbox" id="selAll" checked title="全选/全不选" onclick="selectAllRows(this.checked)"></th>              <th>#</th><th>时间</th><th>实验组</th><th>整形</th><th>协议</th><th>理论上M</th><th>理论下M</th>
               <th>上行M</th><th>下行M</th><th>上行效%</th><th>下行效%</th>
               <th>重传</th><th>抖动ms</th><th>丢包%</th><th>恢复s</th><th>操作</th>
             </tr>

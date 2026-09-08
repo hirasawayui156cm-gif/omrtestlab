@@ -103,16 +103,30 @@ class ThroughputMonitor(threading.Thread):
         return out
 
 
-def measure_rtt(ssh: SSH, iface: str, target: str, count: int = 3) -> dict | None:
-    """对指定接口 ping 目标，返回 {'avg_ms','loss_pct','min_ms','max_ms'} 或 None。"""
-    cmd = f"ping -c {count} -i 0.2 -W 2 -I {iface} {target}"
-    rc, out, err = ssh.run(cmd, timeout=30)
-    text = out or err
-    avg = re.search(r"= [^=]*?\/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)", text)
-    if avg:
-        return {"avg_ms": float(avg.group(2)), "min_ms": float(avg.group(1)),
-                "max_ms": float(avg.group(3)), "loss_pct": 0.0}
+def _parse_rtt(text: str) -> dict | None:
+    """兼容 iputils(busybox) 两种 ping 统计输出：按 min/avg/max 标签取值。"""
+    m = re.search(r"(?:min|round-trip)[^=\n]*?=\s*([\d.]+)/([\d.]+)/([\d.]+)", text, re.I)
+    if m:
+        return {"avg_ms": float(m.group(2)), "min_ms": float(m.group(1)),
+                "max_ms": float(m.group(3)), "loss_pct": 0.0}
     loss = re.search(r"(\d+)% packet loss", text)
     if loss:
         return {"avg_ms": None, "min_ms": None, "max_ms": None, "loss_pct": float(loss.group(1))}
     return None
+
+
+def measure_rtt(ssh: SSH, iface: str, target: str, count: int = 3) -> dict | None:
+    """对指定接口 ping 目标，返回 {'avg_ms','loss_pct','min_ms','max_ms'}。"""
+    cmd = f"ping -c {count} -i 0.2 -W 2 -I {iface} {target}"
+    rc, out, err = ssh.run(cmd, timeout=30)
+    text = out or err
+    res = _parse_rtt(text)
+    if res is None and rc != 0:
+        rc2, out2, err2 = ssh.run(f"ping -c {count} -I {iface} {target}", timeout=30)
+        res = _parse_rtt(out2 or err2)
+        if res is None:
+            text = out2 or err2
+    if res is None:
+        return {"avg_ms": None, "min_ms": None, "max_ms": None, "loss_pct": 0.0,
+                "raw": (text or err or "").strip()[-200:]}
+    return res
