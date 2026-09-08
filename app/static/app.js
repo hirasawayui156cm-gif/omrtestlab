@@ -431,8 +431,23 @@ function handleEvent(e) {
 // ---------------- 结果分析 ----------------
 let RUNS = [];
 let selIds = new Set();
+let sortDesc = true;
 
 function visRuns() { return RUNS.filter((r) => selIds.has(r.id)); }
+
+function sortRuns() {
+  if (sortDesc) {
+    RUNS.sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")) || (b.id - a.id));
+  }
+  // 正序模式：不做时间排序，保留服务器存的(拖拽)顺序
+}
+
+function toggleSortMode() {
+  sortDesc = !sortDesc;
+  const btn = $("btnSort");
+  if (btn) btn.textContent = sortDesc ? "时间倒序(最新在前)" : "正序/拖拽持久";
+  loadResults();
+}
 let charts = {};
 
 function makeChart(id, w = 420, h = 280) {
@@ -459,6 +474,7 @@ async function loadResults() {
   try {
     const r = await api("/api/runs");
     RUNS = r.runs || [];
+    sortRuns();
     const ids = new Set(RUNS.map((x) => x.id));
     selIds = new Set([...selIds].filter((id) => ids.has(id)));
     if (RUNS.length && selIds.size === 0) selIds = new Set(ids);
@@ -696,5 +712,5 @@ $("runsTable").addEventListener("drop", (ev) => {
   dragRowIdx = null;
   renderRunsTable();
   renderSummaryCharts();
-  persistRunOrder();
+  if (!sortDesc) persistRunOrder();
 });

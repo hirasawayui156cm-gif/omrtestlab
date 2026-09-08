@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import traceback
@@ -21,6 +22,7 @@ class Runner:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._ssh: SSH | None = None
+        self._did_shape = False
 
     # ---------- 事件 ----------
     def _emit(self, etype: str, **kw):
@@ -101,6 +103,14 @@ class Runner:
                     self._ssh.run(c, timeout=10)
                 except Exception:
                     pass
+        # 恢复 OMR 默认根 qdisc(fq/pacing)等，避免程序tc 改变 BPI 行为后残留
+        if self._did_shape:
+            try:
+                self._log("info", "恢复 OMR 网络默认( mptcp reload )…")
+                self._ssh.run("/etc/init.d/mptcp reload >/dev/null 2>&1; true", timeout=90)
+            except Exception as exc:
+                self._log("warn", f"恢复 mptcp 默认失败: {exc}")
+            self._did_shape = False
 
     def _run_group(self, group: dict, gi: int, total: int) -> dict | None:
         cfg = self.config
@@ -128,6 +138,7 @@ class Runner:
 
         # 1) 施加整形（program 模式）或跳过（core 模式：由 CORE 整形，速率仅作参考）
         if shaping_on:
+            self._did_shape = True
             self._log("info", f"[{group['name']}] 应用 tc 整形:")
             for l in links:
                 cmds = tc.apply_link_cmds(l["iface"], l.get("rate_mbps"), l.get("delay_ms", 0),

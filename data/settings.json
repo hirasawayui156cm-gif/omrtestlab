@@ -19,7 +19,7 @@
     "user": "u",
     "password": "1",
     "use_sudo": false,
-    "core_file": "/root/.core/configs/b.imn",
+    "core_file": "/root/.core/configs/a1.imn",
     "lagsim_file": ""
   },
   "iperf3": {
@@ -29,15 +29,15 @@
   },
   "groups": [
     {
-      "name": "带宽100/50/50",
-      "duration": 20,
+      "name": "tc带宽100/50/50",
+      "duration": 10,
       "protocol": "tcp",
       "udp_bitrate_mbps": 0,
       "links": [
         {
           "label": "链路1",
           "iface": "lan1",
-          "rate_mbps": 50,
+          "rate_mbps": 100,
           "delay_ms": 20,
           "jitter_ms": 0,
           "loss_pct": 0,
@@ -63,76 +63,18 @@
         }
       ],
       "break": {
-        "enabled": true,
+        "enabled": false,
         "iface": "lan1",
         "at_sec": 5,
         "restore_sec": 2
       },
-      "shaping": "core",
+      "shaping": "program",
       "gid": "E0"
-    },
-    {
-      "name": "导入-CORE-3路(th=200M)",
-      "gid": "",
-      "duration": 15,
-      "protocol": "tcp",
-      "udp_bitrate_mbps": 0,
-      "shaping": "core",
-      "links": [
-        {
-          "label": "链路1(lan1)",
-          "iface": "lan1",
-          "rate_mbps": 100,
-          "delay_ms": 0,
-          "jitter_ms": 0,
-          "loss_pct": 0,
-          "enabled": true
-        },
-        {
-          "label": "链路2(lan2)",
-          "iface": "lan2",
-          "rate_mbps": 50,
-          "delay_ms": 0,
-          "jitter_ms": 0,
-          "loss_pct": 0,
-          "enabled": true
-        },
-        {
-          "label": "链路3(lan3)",
-          "iface": "lan3",
-          "rate_mbps": 50,
-          "delay_ms": 0,
-          "jitter_ms": 0,
-          "loss_pct": 0,
-          "enabled": true
-        }
-      ],
-      "break": {
-        "enabled": false,
-        "iface": "lan1",
-        "at_sec": 0,
-        "restore_sec": 5
-      }
     }
   ],
-  "result_order": [
-    62,
-    63,
-    65,
-    66,
-    68,
-    69,
-    84,
-    85,
-    86,
-    74,
-    75,
-    76,
-    78,
-    79,
-    80,
-    81,
-    88,
-    91
+  "last_links": [
+    "lan1",
+    "lan2",
+    "lan3"
   ]
 }
