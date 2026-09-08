@@ -175,3 +175,104 @@ def _parse_xml_links(text: str) -> list[dict]:
         })
     return lanes
 
+
+# ---------------- 写回 .imn ----------------
+_PARAM_KEYS = ("bandwidth", "ber", "delay", "jitter")
+
+
+def _fmt_num(v: float) -> str:
+    return str(int(v)) if float(v).is_integer() else f"{v:.6g}"
+
+
+def _pair(up, dn) -> str:
+    return f"{{{_fmt_num(up)} {_fmt_num(dn)}}}"
+
+
+def _lane_pair(lane: dict, up_key: str, dn_key: str, conv) -> str | None:
+    up = lane.get(up_key)
+    if up is None:
+        return None
+    dn = lane.get(dn_key)
+    if dn is None:
+        dn = up
+    return _pair(conv(up), conv(dn))
+
+
+def write_core_links(text: str, lanes: list[dict]) -> str:
+    """把参数写回 CORE 文本(.imn)：更新"已有整形参数"的 link 块，顺序对应 lanes。
+
+    参数向量写成 {上行 下行}，如:
+        jitter {1000 1000}
+        ber {0.1 0.05}
+        delay {5000 5000}
+        bandwidth {100000000 300000000}
+    """
+    if not re.search(r"^\s*link\s+\S+\s*\{", text, flags=re.M):
+        raise ValueError("仅支持 CORE 文本(.imn) 格式")
+
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    idx = 0  # 已更新的整形链路序号
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        m = re.match(r"^link\s+(\S+)\s*\{", line)
+        if m:
+            block = [line]
+            i += 1
+            while i < n and not re.match(r"^\s*\}", lines[i]):
+                block.append(lines[i])
+                i += 1
+            if i < n:
+                block.append(lines[i])  # '}' 行
+            i += 1
+            shaped = any(re.match(r"^\s*(" + "|".join(_PARAM_KEYS) + r")\b", b) for b in block)
+            if shaped and idx < len(lanes):
+                lane = lanes[idx]
+                idx += 1
+                params = []
+                # 按示例顺序写：jitter / ber / delay / bandwidth（缺失的补上，双向同值/不同值）
+                def _pv(up_key, dn_key, conv):
+                    s = _lane_pair(lane, up_key, dn_key, conv)
+                    return s
+
+                pv = []
+                for key, upk, dnk, conv in (
+                        ("jitter", "jitter_ms", "dl_jitter_ms", lambda x: round(float(x) * 1000.0)),
+                        ("ber", "loss_pct", "dl_loss_pct", float),
+                        ("delay", "delay_ms", "dl_delay_ms", lambda x: round(float(x) * 1000.0)),
+                        ("bandwidth", "rate_mbps", "dl_rate_mbps", lambda x: round(float(x) * 1_000_000.0))):
+                    if lane.get(upk) is not None:
+                        pv.append(f"{key} {_lane_pair(lane, upk, dnk, conv)}")
+                # 去掉原有 param 行，保留其余(nodes 等)
+                rest = [b for b in block if not re.match(r"^\s*(" + "|".join(_PARAM_KEYS) + r")\b", b)]
+                indent = "    "
+                for b in block:
+                    mm = re.match(r"^(\s*)(" + "|".join(_PARAM_KEYS) + r")\b", b)
+                    if mm:
+                        indent = mm.group(1)
+                        break
+                if not pv:
+                    new_block = block
+                else:
+                    param_lines = [indent + p + "\n" for p in pv]
+                    insert_at = None
+                    for j, b in enumerate(rest):
+                        if re.match(r"^\s*nodes\b", b):
+                            insert_at = j
+                            break
+                    if insert_at is None:
+                        new_block = rest[:-1] + param_lines + rest[-1:]
+                    else:
+                        new_block = rest[:insert_at] + param_lines + rest[insert_at:]
+                out.extend(new_block)
+            else:
+                out.extend(block)
+        else:
+            out.append(line)
+            i += 1
+    if idx == 0:
+        raise ValueError("场景文件中未找到带参数的整形链路(link)")
+    return "".join(out)
+

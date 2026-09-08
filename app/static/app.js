@@ -179,6 +179,7 @@ function renderGroups() {
           <option value="udp" ${g.protocol === "udp" ? "selected" : ""}>UDP（含抖动/丢包统计）</option>
         </select></label>
         <label>UDP带宽(M) <input type="number" value="${g.udp_bitrate_mbps || 0}" placeholder="0=按理论值" data-f="udp_bitrate_mbps" data-gi="${gi}"></label>
+        <button onclick="writeBackCore(${gi})" title="把本组启用链路的参数写回 CORE 场景 .imn">写回CORE</button>
         <button onclick="delGroup(${gi})" class="danger">删除组</button>
       </div>
       <span class="hint" id="shpHint_${gi}">${g.shaping === "core"
@@ -319,6 +320,25 @@ async function importParams(mode) {
     await saveGroups();
     log("info", `导入成功，生成实验组 [${g.name}]，请核对参数后运行`);
   } catch (e) { log("error", "导入失败: " + e.message); }
+}
+
+async function writeBackCore(gi) {
+  const g = GROUPS[gi];
+  if (!g) return;
+  const lanes = (g.links || []).filter((l) => l.enabled).map((l) => ({
+    rate_mbps: l.rate_mbps || 0, delay_ms: l.delay_ms || 0,
+    jitter_ms: l.jitter_ms || 0, loss_pct: l.loss_pct || 0,
+    dl_rate_mbps: l.dl_rate_mbps != null ? l.dl_rate_mbps : (l.rate_mbps || 0),
+    dl_delay_ms: l.dl_delay_ms != null ? l.dl_delay_ms : (l.delay_ms || 0),
+    dl_jitter_ms: l.dl_jitter_ms != null ? l.dl_jitter_ms : (l.jitter_ms || 0),
+    dl_loss_pct: l.dl_loss_pct != null ? l.dl_loss_pct : (l.loss_pct || 0),
+  }));
+  if (!lanes.length) { log("warn", "没有启用的链路"); return; }
+  if (!confirm(`把 [${g.name}] 的 ${lanes.length} 条链路参数写回 CORE 场景文件？`)) return;
+  try {
+    const r = await api("/api/core-write", { method: "POST", body: JSON.stringify({ lanes }) });
+    log("info", "写回成功: " + r.message);
+  } catch (e) { log("error", "写回失败: " + e.message); }
 }
 
 async function saveGroups() {

@@ -36,7 +36,7 @@
   },
   "groups": [
     {
-      "name": "5G/5G/5G",
+      "name": "Cable/Cable/Cable",
       "gid": "E",
       "duration": 15,
       "protocol": "tcp",
@@ -46,11 +46,11 @@
         {
           "label": "链路1(lan1)",
           "iface": "lan1",
-          "rate_mbps": 100,
+          "rate_mbps": 20,
           "delay_ms": 5,
           "jitter_ms": 1,
-          "loss_pct": 0.1,
-          "dl_rate_mbps": 300,
+          "loss_pct": 0.05,
+          "dl_rate_mbps": 200,
           "dl_delay_ms": 5,
           "dl_jitter_ms": 1,
           "dl_loss_pct": 0.05,
@@ -59,11 +59,11 @@
         {
           "label": "链路2(lan2)",
           "iface": "lan2",
-          "rate_mbps": 100,
+          "rate_mbps": 20,
           "delay_ms": 5,
           "jitter_ms": 1,
-          "loss_pct": 0.1,
-          "dl_rate_mbps": 300,
+          "loss_pct": 0.05,
+          "dl_rate_mbps": 200,
           "dl_delay_ms": 5,
           "dl_jitter_ms": 1,
           "dl_loss_pct": 0.05,
@@ -72,11 +72,11 @@
         {
           "label": "链路3(lan3)",
           "iface": "lan3",
-          "rate_mbps": 100,
+          "rate_mbps": 20,
           "delay_ms": 5,
           "jitter_ms": 1,
-          "loss_pct": 0.1,
-          "dl_rate_mbps": 300,
+          "loss_pct": 0.05,
+          "dl_rate_mbps": 200,
           "dl_delay_ms": 5,
           "dl_jitter_ms": 1,
           "dl_loss_pct": 0.05,
@@ -90,5 +90,10 @@
         "restore_sec": 5
       }
     }
+  ],
+  "last_links": [
+    "lan1",
+    "lan2",
+    "lan3"
   ]
 }

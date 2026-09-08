@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import iperf
 from .config import BASE_DIR, load_config, save_config
-from .importer import parse_core_links
+from .importer import parse_core_links, write_core_links
 from .runner import Runner
 from .ssh import SSH
 from .storage import Storage
@@ -168,6 +168,44 @@ def prepare():
     except Exception as exc:
         results["vps_iperf3"] = {"ok": False, "error": str(exc)}
     return results
+
+
+@app.post("/api/core-write")
+def core_write(body: dict):
+    """把实验组链路参数写回 CORE 场景 .imn（整形网关 SSH 读取/写回）。
+
+    body: {lanes:[{rate_mbps,delay_ms,jitter_ms,loss_pct, dl_*...}, ...]}
+    """
+    import base64
+    lanes = body.get("lanes") or []
+    if not lanes:
+        return {"ok": False, "error": "没有链路参数"}
+    sh = CONFIG.get("shaper", {})
+    if not sh.get("host"):
+        return {"ok": False, "error": "未配置整形网关(电脑C) SSH"}
+    f = sh.get("core_file") or ""
+    if not f:
+        return {"ok": False, "error": "未配置 CORE 场景文件路径(core_file)"}
+    try:
+        ssh = _ssh_for("shaper")
+    except Exception as exc:
+        return {"ok": False, "error": f"连接整形网关失败: {exc}"}
+    rc, out, err = ssh.run(f"cat {f}")
+    if rc != 0 or not out:
+        ssh.close()
+        return {"ok": False, "error": f"读取场景失败: {err.strip()[:200]}"}
+    try:
+        new_text = write_core_links(out, lanes)
+    except Exception as exc:
+        ssh.close()
+        return {"ok": False, "error": f"生成场景失败: {exc}"}
+    b64 = base64.b64encode(new_text.encode("utf-8")).decode()
+    rc, out2, err2 = ssh.run(f"printf '%s' '{b64}' | base64 -d > {f} && echo WRITE_OK")
+    ssh.close()
+    if "WRITE_OK" not in out2:
+        return {"ok": False, "error": f"写回失败: {err2.strip()[:200]} {out2.strip()[:200]}"}
+    return {"ok": True,
+            "message": f"已写回 {len(lanes)} 条整形链路到 {f}；请到 CORE GUI 重新打开/Start 该场景生效"}
 
 
 @app.post("/api/import")
