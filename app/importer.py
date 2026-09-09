@@ -108,13 +108,13 @@ def _to_ms(v: float) -> float:
 def _parse_core_text_links(text: str) -> list[dict]:
     """解析 CORE 文本(.imn)格式的 link 块（支持标量/不对称矢量）。
 
-    示例:
+    CORE 矢量语义：{下行 上行}，例如
         link l2 {
-            delay {5000 5000}        # 双向 5ms（微秒）
-            nodes {n5 n1}
-            bandwidth {100000000 30000000}  # bps，不对称 100M/30M
+            delay {5000 5000}          # 双向 5ms（微秒）
+            nodes {n1 n5}
+            bandwidth {50000000 20000000}  # 下行50M / 上行20M（bps）
             jitter {1000 1000}
-            loss {0.1 0.05}
+            ber {0.1 0.05}
         }
     """
     lanes = []
@@ -139,11 +139,14 @@ def _parse_core_text_links(text: str) -> list[dict]:
                 for k, cv in (("rate", _to_rate), ("delay", _to_ms),
                               ("jitter", _to_ms), ("loss", lambda x: x)):
                     if k in cur and cur[k]:
-                        lane[k + "_mbps" if k == "rate" else
-                             (k + "_ms" if k in ("delay", "jitter") else k + "_pct")] = cv(cur[k][0])
-                        if len(cur[k]) > 1:  # 不对称：保留第二方向供参考
+                        vals = cur[k]
+                        # 矢量 = {下行 上行}；标量 = 双向同值
+                        dn, up = vals[0], (vals[1] if len(vals) > 1 else vals[0])
+                        suf = "mbps" if k == "rate" else ("ms" if k in ("delay", "jitter") else "pct")
+                        lane[k + "_" + suf] = cv(up)      # 上行(用户主字段)
+                        lane["dl_" + k + "_" + suf] = cv(dn)  # 下行
+                        if len(vals) > 1:
                             lane["asym"] = True
-                            lane.setdefault("extra", {})[k] = cur[k]
                 if lane:
                     lanes.append(lane)
                 cur = None
@@ -184,28 +187,29 @@ def _fmt_num(v: float) -> str:
     return str(int(v)) if float(v).is_integer() else f"{v:.6g}"
 
 
-def _pair(up, dn) -> str:
-    return f"{{{_fmt_num(up)} {_fmt_num(dn)}}}"
+def _pair(first, second) -> str:
+    return f"{{{_fmt_num(first)} {_fmt_num(second)}}}"
 
 
 def _lane_pair(lane: dict, up_key: str, dn_key: str, conv) -> str | None:
+    """按 CORE 语义 {下行 上行} 输出：先下行(dl_*)，后上行(*)。"""
     up = lane.get(up_key)
     if up is None:
         return None
     dn = lane.get(dn_key)
     if dn is None:
         dn = up
-    return _pair(conv(up), conv(dn))
+    return _pair(conv(dn), conv(up))
 
 
 def write_core_links(text: str, lanes: list[dict]) -> str:
     """把参数写回 CORE 文本(.imn)：更新"已有整形参数"的 link 块，顺序对应 lanes。
 
-    参数向量写成 {上行 下行}，如:
+    参数向量按 CORE 语义写成 {下行 上行}，如:
         jitter {1000 1000}
         ber {0.1 0.05}
         delay {5000 5000}
-        bandwidth {100000000 300000000}
+        bandwidth {100000000 20000000}   # 下行100M / 上行20M
     """
     if not re.search(r"^\s*link\s+\S+\s*\{", text, flags=re.M):
         raise ValueError("仅支持 CORE 文本(.imn) 格式")
@@ -243,8 +247,16 @@ def write_core_links(text: str, lanes: list[dict]) -> str:
                         ("ber", "loss_pct", "dl_loss_pct", float),
                         ("delay", "delay_ms", "dl_delay_ms", lambda x: round(float(x) * 1000.0)),
                         ("bandwidth", "rate_mbps", "dl_rate_mbps", lambda x: round(float(x) * 1_000_000.0))):
-                    if lane.get(upk) is not None:
-                        pv.append(f"{key} {_lane_pair(lane, upk, dnk, conv)}")
+                    up = lane.get(upk)
+                    dn = lane.get(dnk)
+                    if up is None:
+                        continue
+                    if dn is None:
+                        dn = up
+                    # 上/下均为 0 的参数就不写该行（不给 0 占位）
+                    if up == 0 and dn == 0:
+                        continue
+                    pv.append(f"{key} {_pair(conv(dn), conv(up))}")
                 # 去掉原有 param 行，保留其余(nodes 等)
                 rest = [b for b in block if not re.match(r"^\s*(" + "|".join(_PARAM_KEYS) + r")\b", b)]
                 indent = "    "

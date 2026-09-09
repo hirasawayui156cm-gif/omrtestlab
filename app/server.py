@@ -246,13 +246,6 @@ def import_params(body: dict):
     # 映射到 BPI 链路接口（可按 body.ifaces 覆盖）
     ifaces = (body.get("ifaces") or ["lan1", "lan2", "lan3"])[: len(lanes)]
     links = []
-
-    def _dl_val(lane, key, conv, fallback):
-        extra = (lane.get("extra") or {}).get(key)
-        if extra and len(extra) > 1:
-            return conv(extra[1])
-        return fallback
-
     for idx, (iface, lane) in enumerate(zip(ifaces, lanes)):
         links.append({
             "label": f"链路{idx + 1}({iface})",
@@ -261,10 +254,10 @@ def import_params(body: dict):
             "delay_ms": round(lane.get("delay_ms") or 0, 3),
             "jitter_ms": round(lane.get("jitter_ms") or 0, 3),
             "loss_pct": round(lane.get("loss_pct") or 0, 3),
-            "dl_rate_mbps": round(_dl_val(lane, "rate", lambda v: v / 1e6, lane.get("rate_mbps") or 0), 3),
-            "dl_delay_ms": round(_dl_val(lane, "delay", lambda v: v / 1000.0, lane.get("delay_ms") or 0), 3),
-            "dl_jitter_ms": round(_dl_val(lane, "jitter", lambda v: v / 1000.0, lane.get("jitter_ms") or 0), 3),
-            "dl_loss_pct": round(_dl_val(lane, "loss", lambda v: v, lane.get("loss_pct") or 0), 3),
+            "dl_rate_mbps": round(lane.get("dl_rate_mbps") if lane.get("dl_rate_mbps") is not None else (lane.get("rate_mbps") or 0), 3),
+            "dl_delay_ms": round(lane.get("dl_delay_ms") if lane.get("dl_delay_ms") is not None else (lane.get("delay_ms") or 0), 3),
+            "dl_jitter_ms": round(lane.get("dl_jitter_ms") if lane.get("dl_jitter_ms") is not None else (lane.get("jitter_ms") or 0), 3),
+            "dl_loss_pct": round(lane.get("dl_loss_pct") if lane.get("dl_loss_pct") is not None else (lane.get("loss_pct") or 0), 3),
             "enabled": True,
         })
     theory = sum(l["rate_mbps"] for l in links)
