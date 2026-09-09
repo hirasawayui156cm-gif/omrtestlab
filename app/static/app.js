@@ -577,16 +577,16 @@ function renderSummaryCharts() {
     series: [...txS, ...rxS],
   }));
 
-  // 4) 各链路时延
+  // 4) 各链路往返时延 RTT
   const rttS = ifacesAll.map((iface) => ({
-    name: iface, type: "bar",
+    name: iface + " RTT", type: "bar",
     data: R.map((r) => {
       const v = (r.per_link[iface] || {}).rtt || {};
       return v.avg_ms == null ? null : +v.avg_ms.toFixed(1);
     }),
   }));
   makeChart("chartRtt")?.setOption(chartOpt({
-    legend: { data: ifacesAll },
+    legend: { data: ifacesAll.map((f) => f + " RTT") },
     xAxis: { type: "category", data: labels, axisLabel: { color: "#8b9bb4", rotate: 20 } },
     yAxis: { type: "value", name: "ms", axisLabel: { color: "#8b9bb4" } },
     series: rttS,
@@ -685,7 +685,7 @@ function renderDetailLinks(r) {
     </tr>`;
   }).join("");
   $("detailLinksTable").innerHTML = `<table class="runs"><thead><tr>
-    <th>链路</th><th>接口</th><th>配置 速率/时延/丢包</th><th>上行 均/峰</th><th>下行 均/峰</th><th>实测时延</th>
+    <th>链路</th><th>接口</th><th>配置 速率/时延/丢包</th><th>上行 均/峰</th><th>下行 均/峰</th><th>往返时延RTT(ms)</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
 }
 

@@ -36,8 +36,8 @@
   },
   "groups": [
     {
-      "name": "写回-CORE-3路(th=150M/th下60M)",
-      "gid": "F1",
+      "name": "S/C/C",
+      "gid": "F2",
       "duration": 15,
       "protocol": "tcp",
       "udp_bitrate_mbps": 0,
@@ -46,40 +46,40 @@
         {
           "label": "链路1(lan1)",
           "iface": "lan1",
-          "rate_mbps": 50,
-          "delay_ms": 5,
-          "jitter_ms": 0,
-          "loss_pct": 0,
-          "dl_rate_mbps": 20,
-          "dl_delay_ms": 5,
-          "dl_jitter_ms": 0,
-          "dl_loss_pct": 0,
+          "rate_mbps": 20,
+          "delay_ms": 20,
+          "jitter_ms": 10,
+          "loss_pct": 1,
+          "dl_rate_mbps": 100,
+          "dl_delay_ms": 20,
+          "dl_jitter_ms": 5,
+          "dl_loss_pct": 0.5,
           "enabled": true
         },
         {
           "label": "链路2(lan2)",
           "iface": "lan2",
-          "rate_mbps": 50,
+          "rate_mbps": 20,
           "delay_ms": 5,
-          "jitter_ms": 0,
-          "loss_pct": 0,
-          "dl_rate_mbps": 20,
+          "jitter_ms": 1,
+          "loss_pct": 0.05,
+          "dl_rate_mbps": 200,
           "dl_delay_ms": 5,
-          "dl_jitter_ms": 0,
-          "dl_loss_pct": 0,
+          "dl_jitter_ms": 1,
+          "dl_loss_pct": 0.05,
           "enabled": true
         },
         {
           "label": "链路3(lan3)",
           "iface": "lan3",
-          "rate_mbps": 50,
+          "rate_mbps": 20,
           "delay_ms": 5,
-          "jitter_ms": 0,
-          "loss_pct": 0,
-          "dl_rate_mbps": 20,
+          "jitter_ms": 1,
+          "loss_pct": 0.05,
+          "dl_rate_mbps": 200,
           "dl_delay_ms": 5,
-          "dl_jitter_ms": 0,
-          "dl_loss_pct": 0,
+          "dl_jitter_ms": 1,
+          "dl_loss_pct": 0.05,
           "enabled": true
         }
       ],
@@ -90,10 +90,5 @@
         "restore_sec": 5
       }
     }
-  ],
-  "last_links": [
-    "lan1",
-    "lan2",
-    "lan3"
   ]
 }
