@@ -127,6 +127,16 @@ def measure_rtt(ssh: SSH, iface: str, target: str, count: int = 3) -> dict | Non
         if res is None:
             text = out2 or err2
     if res is None:
+        # 兜底：取该接口 IP，用 -I <IP> 再试（兼容不认接口名的 busybox）
+        rc3, ipout, _ = ssh.run(
+            f"ip -4 -o addr show dev {iface} 2>/dev/null | awk '{{print $4}}' | cut -d/ -f1 | head -1")
+        ip = (ipout or "").strip().splitlines()[0] if ipout and ipout.strip() else ""
+        if ip:
+            rc4, out4, err4 = ssh.run(f"ping -c {count} -W 2 -I {ip} {target}", timeout=30)
+            res = _parse_rtt(out4 or err4)
+            if res is None:
+                text = out4 or err4
+    if res is None:
         return {"avg_ms": None, "min_ms": None, "max_ms": None, "loss_pct": 0.0,
                 "raw": (text or err or "").strip()[-200:]}
     return res

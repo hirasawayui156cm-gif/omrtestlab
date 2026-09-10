@@ -13,6 +13,14 @@ DEFAULT_CONFIG = {
     "vps": {"host": "", "port": 22, "user": "root", "password": "", "use_sudo": False},
     "shaper": {"host": "", "port": 22, "user": "root", "password": "", "use_sudo": False,
                "core_file": ""},
+    "core_live": {
+        "enabled": False,
+        "cmd_template": ("coresendmsg link n1_number={n1} n2_number={n2} "
+                         "iface1_number={i1} iface2_number={i2} "
+                         "delay={delay} jitter={jitter} loss={loss} dup={dup} bandwidth={bw}"),
+        "dup": 0,
+        "map": {"eth0": "1,8,1,0", "eth1": "1,8,1,0", "eth2": "1,8,1,0", "eth3": "1,8,1,0"},
+    },
     "iperf3": {"port": 5201, "udp_bitrate_mbps": 0, "mptcp": True},
     "vps_downlink": {"enabled": False, "map": {"lan1": "ens36", "lan2": "ens35", "lan3": "ens34"}},
     "last_links": [],

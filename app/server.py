@@ -208,6 +208,57 @@ def core_write(body: dict):
             "message": f"已写回 {len(lanes)} 条整形链路到 {f}；请到 CORE GUI 重新打开/Start 该场景生效"}
 
 
+@app.post("/api/core-live")
+def core_live(body: dict):
+    """用 coresendmsg 把参数实时下发到运行中的 CORE（免写文件/免重启）。
+
+    body: {lanes:[{iface,rate_mbps,delay_ms,...}, ...]}
+    """
+    cl = CONFIG.get("core_live", {}) or {}
+    lanes = body.get("lanes") or []
+    if not lanes:
+        return {"ok": False, "error": "没有链路参数"}
+    sh = CONFIG.get("shaper", {})
+    if not sh.get("host"):
+        return {"ok": False, "error": "未配置整形网关(电脑C) SSH"}
+    mapping = cl.get("map") or {}
+    tpl = cl.get("cmd_template") or (
+        "coresendmsg link n1_number={n1} n2_number={n2} iface1_number={i1} "
+        "iface2_number={i2} delay={delay} jitter={jitter} loss={loss} dup={dup} bandwidth={bw}")
+    dup = cl.get("dup", 0)
+
+    def _cmd(i1, i2, delay_ms, jitter_ms, loss_pct, rate_mbps):
+        return tpl.format(n1=parts[0], n2=parts[1], i1=i1, i2=i2,
+                          delay=int(round(float(delay_ms or 0) * 1000)),
+                          jitter=int(round(float(jitter_ms or 0) * 1000)),
+                          loss=float(loss_pct or 0), dup=dup,
+                          bw=int(round(float(rate_mbps or 0) * 1_000_000)))
+
+    try:
+        ssh = _ssh_for("shaper")
+    except Exception as exc:
+        return {"ok": False, "error": f"连接整形网关失败: {exc}"}
+    logs, okc = [], 0
+    for l in lanes:
+        iface = l.get("iface")
+        parts = (mapping.get(iface) or "").replace(" ", "").split(",")
+        if len(parts) < 4:
+            logs.append(f"{iface}: 未配置 n1,n2,iface1,iface2 映射，跳过")
+            continue
+        cmds = [_cmd(parts[2], parts[3], l.get("delay_ms"), l.get("jitter_ms"),
+                     l.get("loss_pct"), l.get("rate_mbps"))]
+        # 上下行不对称：再发一条，交换 iface1/iface2，用下行参数
+        if any(l.get(k) is not None for k in ("dl_delay_ms", "dl_jitter_ms", "dl_loss_pct", "dl_rate_mbps")):
+            cmds.append(_cmd(parts[3], parts[2], l.get("dl_delay_ms"), l.get("dl_jitter_ms"),
+                             l.get("dl_loss_pct"), l.get("dl_rate_mbps")))
+        for cmd in cmds:
+            rc, out, err = ssh.run(cmd, timeout=20)
+            okc += 1 if rc == 0 else 0
+            logs.append(f"{iface}: rc={rc} {cmd}" + ("" if rc == 0 else f" | {err.strip()[:120]}"))
+    ssh.close()
+    return {"ok": okc > 0, "message": "；".join(logs)}
+
+
 @app.post("/api/import")
 def import_params(body: dict):
     """从 CORE 场景导入参数 → 生成一个"外部整形"实验组。
@@ -244,7 +295,7 @@ def import_params(body: dict):
                 "head": (raw or "")[:500]}
 
     # 映射到 BPI 链路接口（可按 body.ifaces 覆盖）
-    ifaces = (body.get("ifaces") or ["lan1", "lan2", "lan3"])[: len(lanes)]
+    ifaces = (body.get("ifaces") or ["eth0", "eth1", "eth2", "eth3"])[: len(lanes)]
     links = []
     for idx, (iface, lane) in enumerate(zip(ifaces, lanes)):
         links.append({

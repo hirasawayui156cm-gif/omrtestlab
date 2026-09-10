@@ -3,11 +3,11 @@
     "host": "192.168.100.1",
     "port": 22,
     "user": "root",
-    "password": "banana",
+    "password": "Nudt@501",
     "use_sudo": false
   },
   "vps": {
-    "host": "192.168.10.172",
+    "host": "192.168.10.135",
     "port": 65222,
     "user": "u",
     "password": "1",
@@ -19,7 +19,7 @@
     "user": "u",
     "password": "1",
     "use_sudo": false,
-    "core_file": "/root/.core/configs/a1.imn"
+    "core_file": "/root/.core/configs/aaaaaaa.imn"
   },
   "iperf3": {
     "port": 5201,
@@ -27,59 +27,69 @@
     "udp_bitrate_mbps": 0
   },
   "vps_downlink": {
-    "enabled": true,
+    "enabled": false,
     "map": {
       "lan1": "ens36",
       "lan2": "ens35",
       "lan3": "ens34"
     }
   },
+  "core_live": {
+    "enabled": true,
+    "cmd_template": "coresendmsg link n1_number={n1} n2_number={n2} iface1_number={i1} iface2_number={i2} delay={delay} jitter={jitter} loss={loss} dup={dup} bandwidth={bw}",
+    "dup": 0,
+    "map": {
+      "eth0": "1,8,1,0",
+      "eth1": "9,10,1,0",
+      "eth2": "11,12,1,0"
+    }
+  },
   "groups": [
     {
-      "name": "S/C/C",
-      "gid": "F2",
-      "duration": 15,
+      "name": "bw=7/7/7",
+      "gid": "a7",
+      "duration": 30,
       "protocol": "tcp",
       "udp_bitrate_mbps": 0,
       "shaping": "core",
       "links": [
         {
-          "label": "链路1(lan1)",
-          "iface": "lan1",
-          "rate_mbps": 20,
+          "label": "链路1",
+          "iface": "eth0",
+          "rate_mbps": 7,
           "delay_ms": 20,
-          "jitter_ms": 10,
-          "loss_pct": 1,
-          "dl_rate_mbps": 100,
+          "jitter_ms": 0,
+          "loss_pct": 0,
+          "dl_rate_mbps": 7,
           "dl_delay_ms": 20,
-          "dl_jitter_ms": 5,
-          "dl_loss_pct": 0.5,
+          "dl_jitter_ms": 0,
+          "dl_loss_pct": 0,
           "enabled": true
         },
         {
-          "label": "链路2(lan2)",
-          "iface": "lan2",
-          "rate_mbps": 20,
-          "delay_ms": 5,
-          "jitter_ms": 1,
-          "loss_pct": 0.05,
-          "dl_rate_mbps": 200,
-          "dl_delay_ms": 5,
-          "dl_jitter_ms": 1,
-          "dl_loss_pct": 0.05,
+          "label": "链路2",
+          "iface": "eth1",
+          "rate_mbps": 7,
+          "delay_ms": 20,
+          "jitter_ms": 0,
+          "loss_pct": 0,
+          "dl_rate_mbps": 7,
+          "dl_delay_ms": 20,
+          "dl_jitter_ms": 0,
+          "dl_loss_pct": 0,
           "enabled": true
         },
         {
-          "label": "链路3(lan3)",
-          "iface": "lan3",
-          "rate_mbps": 20,
-          "delay_ms": 5,
-          "jitter_ms": 1,
-          "loss_pct": 0.05,
-          "dl_rate_mbps": 200,
-          "dl_delay_ms": 5,
-          "dl_jitter_ms": 1,
-          "dl_loss_pct": 0.05,
+          "label": "链路3",
+          "iface": "eth2",
+          "rate_mbps": 7,
+          "delay_ms": 20,
+          "jitter_ms": 0,
+          "loss_pct": 0,
+          "dl_rate_mbps": 7,
+          "dl_delay_ms": 20,
+          "dl_jitter_ms": 0,
+          "dl_loss_pct": 0,
           "enabled": true
         }
       ],

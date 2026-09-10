@@ -23,7 +23,9 @@ class Runner:
         self._thread: threading.Thread | None = None
         self._ssh: SSH | None = None
         self._vps_ssh: SSH | None = None
+        self._shaper_ssh: SSH | None = None
         self._vps_shaped: list[str] = []
+        self._broken_ifaces: list[str] = []
         self._did_shape = False
 
     def _ensure_vps(self):
@@ -83,12 +85,24 @@ class Runner:
                     except Exception:
                         pass
             self._vps_shaped = []
+        for iface in list(self._broken_ifaces):
+            try:
+                self._ssh.run(f"ip link set {iface} up", timeout=10)
+            except Exception:
+                pass
+        self._broken_ifaces = []
         if self._vps_ssh:
             try:
                 self._vps_ssh.close()
             except Exception:
                 pass
             self._vps_ssh = None
+        if getattr(self, "_shaper_ssh", None):
+            try:
+                self._shaper_ssh.close()
+            except Exception:
+                pass
+            self._shaper_ssh = None
         if self._ssh:
             try:
                 self._ssh.close()
@@ -150,6 +164,63 @@ class Runner:
                     except Exception:
                         pass
             self._vps_shaped = []
+        # 确保断链的接口都恢复
+        for iface in list(self._broken_ifaces):
+            try:
+                self._ssh.run(f"ip link set {iface} up", timeout=10)
+            except Exception:
+                pass
+        self._broken_ifaces = []
+
+    def _ensure_shaper(self):
+        if getattr(self, "_shaper_ssh", None):
+            return
+        sh = self.config.get("shaper", {})
+        if not sh.get("host"):
+            self._shaper_ssh = None
+            return
+        try:
+            self._shaper_ssh = SSH(sh.get("host"), sh.get("port", 22), sh.get("user"),
+                                   sh.get("password", ""), use_sudo=sh.get("use_sudo", False))
+        except Exception as exc:
+            self._log("warn", f"连接整形网关失败: {exc}")
+            self._shaper_ssh = None
+
+    def _apply_core_live(self, links: list[dict]):
+        cl = self.config.get("core_live", {}) or {}
+        if not cl.get("enabled"):
+            return
+        self._ensure_shaper()
+        if not self._shaper_ssh:
+            self._log("warn", "CORE实时应用：未配置/连不上整形网关，跳过")
+            return
+        mapping = cl.get("map") or {}
+        tpl = cl.get("cmd_template") or (
+            "coresendmsg link n1_number={n1} n2_number={n2} iface1_number={i1} "
+            "iface2_number={i2} delay={delay} jitter={jitter} loss={loss} dup={dup} bandwidth={bw}")
+        dup = cl.get("dup", 0)
+
+        def _cmd(parts, i1, i2, delay_ms, jitter_ms, loss_pct, rate_mbps):
+            return tpl.format(n1=parts[0], n2=parts[1], i1=i1, i2=i2,
+                              delay=int(round(float(delay_ms or 0) * 1000)),
+                              jitter=int(round(float(jitter_ms or 0) * 1000)),
+                              loss=float(loss_pct or 0), dup=dup,
+                              bw=int(round(float(rate_mbps or 0) * 1_000_000)))
+
+        for l in links:
+            parts = (mapping.get(l.get("iface")) or "").replace(" ", "").split(",")
+            if len(parts) < 4:
+                self._log("warn", f"  {l.get('iface')} 无 coresendmsg 映射，跳过")
+                continue
+            cmds = [_cmd(parts, parts[2], parts[3], l.get("delay_ms"), l.get("jitter_ms"),
+                         l.get("loss_pct"), l.get("rate_mbps"))]
+            if any(l.get(k) is not None for k in ("dl_delay_ms", "dl_jitter_ms", "dl_loss_pct", "dl_rate_mbps")):
+                cmds.append(_cmd(parts, parts[3], parts[2], l.get("dl_delay_ms"), l.get("dl_jitter_ms"),
+                                 l.get("dl_loss_pct"), l.get("dl_rate_mbps")))
+            for cmd in cmds:
+                rc, out, err = self._shaper_ssh.run(cmd, timeout=20)
+                self._log("info" if rc == 0 else "warn",
+                          f"  CORE实时 {l.get('iface')}: rc={rc} {cmd}")
 
     def _run_group(self, group: dict, gi: int, total: int) -> dict | None:
         cfg = self.config
@@ -221,14 +292,15 @@ class Runner:
         else:
             self._log("info", f"[{group['name']}] CORE整形模式：跳过 tc，"
                               f"速率仅作理论参考（theory={sum(float(l.get('rate_mbps') or 0) for l in links)}Mbps）")
+            self._apply_core_live(links)
 
-        # 2) 断链计划（可选，容灾测试）
-        break_cfg = group.get("break", {}) or {}
-        break_thread = None
-        if break_cfg.get("enabled") and break_cfg.get("iface") and not self._stop.is_set():
-            break_thread = threading.Thread(
-                target=self._do_break, args=(break_cfg, ifaces, duration), daemon=True)
-            break_thread.start()
+        # 2) 断链计划（可选，容灾测试）：支持多条/多接口/同一时刻断多条
+        breaks = self._normalize_breaks(group)
+        self._broken_ifaces = []
+        for b in breaks:
+            if b.get("at_sec", 0) > 0 and b.get("ifaces") and not self._stop.is_set():
+                threading.Thread(target=self._do_break_multi, args=(b,), daemon=True).start()
+        break_cfg = breaks[0] if breaks else {}
 
         # 3) 吞吐实时监控（覆盖整段测速）
         theory_mbps = sum(float(l.get("rate_mbps") or 0) for l in links) or 0
@@ -318,14 +390,16 @@ class Runner:
             "timeline_up": (up or {}).get("timeline", []),
             "timeline_down": (down or {}).get("timeline", []),
             "monitor": monitor.samples,
+            "breaks": breaks,
             "break": break_cfg,
             "recovery_sec": None,
         }
 
-        # 7) 断链恢复时间估算（优先用 iperf 上行时间线，其次 monitor）
-        if break_cfg.get("enabled") and break_cfg.get("restore_sec"):
-            at = float(break_cfg.get("at_sec", 0) or 0)
-            rst = float(break_cfg.get("restore_sec", 0) or 0)
+        # 7) 断链恢复时间估算（用第一个"有恢复间隔"的断链条目）
+        first = next((b for b in breaks if b.get("restore_sec", 0) > 0), None)
+        if first:
+            at = float(first.get("at_sec", 0) or 0)
+            rst = float(first.get("restore_sec", 0) or 0)
             tl = (up or {}).get("timeline", [])
             if tl:
                 result["recovery_sec"] = self._estimate_recovery_timeline(tl, at, rst)
@@ -336,31 +410,52 @@ class Runner:
         return result
 
     # ---------- 断链/恢复 ----------
-    def _do_break(self, break_cfg: dict, ifaces: list[str], duration: int):
-        iface = break_cfg.get("iface")
-        at = float(break_cfg.get("at_sec", 0) or 0)
-        restore = float(break_cfg.get("restore_sec", 0) or 0)
-        if at <= 0 or iface not in ifaces:
-            return
+    @staticmethod
+    def _normalize_breaks(group: dict) -> list[dict]:
+        """兼容旧单条 break，统一成列表 [{ifaces:[..], at_sec, restore_sec}]。"""
+        out = []
+        for b in (group.get("breaks") or []):
+            ifaces = b.get("ifaces")
+            if isinstance(ifaces, str):
+                ifaces = [x.strip() for x in re.split(r"[,\s]+", ifaces) if x.strip()]
+            if ifaces and float(b.get("at_sec", 0) or 0) > 0:
+                out.append({"ifaces": ifaces, "at_sec": float(b.get("at_sec") or 0),
+                            "restore_sec": float(b.get("restore_sec") or 0)})
+        old = group.get("break") or {}
+        if not out and old.get("enabled") and old.get("iface") and float(old.get("at_sec", 0) or 0) > 0:
+            out.append({"ifaces": [old["iface"]], "at_sec": float(old.get("at_sec") or 0),
+                        "restore_sec": float(old.get("restore_sec") or 0)})
+        return out
+
+    def _do_break_multi(self, b: dict):
+        ifaces = b.get("ifaces") or []
+        at = float(b.get("at_sec", 0) or 0)
+        restore = float(b.get("restore_sec", 0) or 0)
         time.sleep(at)
         if self._stop.is_set():
             return
-        self._log("warn", f"[断链] 断开 {iface}（第 {at:.0f}s）")
-        self._emit("break", action="down", iface=iface)
-        try:
-            self._ssh.run(f"ip link set {iface} down", timeout=10)
-        except Exception as exc:
-            self._log("error", f"[断链] 失败: {exc}")
+        self._log("warn", f"[断链] 第{at:.0f}s 断开 {', '.join(ifaces)}")
+        for iface in ifaces:
+            self._emit("break", action="down", iface=iface)
+            try:
+                self._ssh.run(f"ip link set {iface} down", timeout=10)
+                if iface not in self._broken_ifaces:
+                    self._broken_ifaces.append(iface)
+            except Exception as exc:
+                self._log("error", f"[断链] {iface} down 失败: {exc}")
         if restore > 0:
             time.sleep(restore)
             if self._stop.is_set():
                 return
-            self._log("warn", f"[断链] 恢复 {iface}")
-            self._emit("break", action="up", iface=iface)
-            try:
-                self._ssh.run(f"ip link set {iface} up", timeout=10)
-            except Exception as exc:
-                self._log("error", f"[断链] 恢复失败: {exc}")
+            self._log("warn", f"[断链] 恢复 {', '.join(ifaces)}")
+            for iface in ifaces:
+                self._emit("break", action="up", iface=iface)
+                try:
+                    self._ssh.run(f"ip link set {iface} up", timeout=10)
+                    if iface in self._broken_ifaces:
+                        self._broken_ifaces.remove(iface)
+                except Exception as exc:
+                    self._log("error", f"[断链] {iface} up 失败: {exc}")
 
     @staticmethod
     def _estimate_recovery(samples: list[dict], at_sec: float, restore_sec: float) -> float | None:

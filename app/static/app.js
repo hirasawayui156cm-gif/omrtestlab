@@ -57,6 +57,11 @@ async function loadConfig() {
     const dn = CONFIG.vps_downlink || {};
     $("v_dn_en").checked = !!dn.enabled;
     $("v_dn_map").value = Object.entries(dn.map || {}).map(([k, v]) => `${k}=${v}`).join("\n");
+    const cl = CONFIG.core_live || {};
+    $("cl_en").checked = !!cl.enabled;
+    $("cl_tpl").value = cl.cmd_template || "";
+    $("cl_dup").value = cl.dup != null ? cl.dup : 0;
+    $("cl_map").value = Object.entries(cl.map || {}).map(([k, v]) => `${k}=${v}`).join("\n");
     $("i_port").value = i.port || 5201;
     $("i_mptcp").checked = i.mptcp !== false;
     GROUPS = (CONFIG.groups || []).slice();
@@ -85,6 +90,7 @@ function collectConfigFromForm() {
     },
     iperf3: { port: parseInt($("i_port").value) || 5201, mptcp: $("i_mptcp").checked, udp_bitrate_mbps: 0 },
     vps_downlink: parseDownlinkMap(),
+    core_live: parseCoreLive(),
     groups: GROUPS,
   };
 }
@@ -179,6 +185,7 @@ function renderGroups() {
           <option value="udp" ${g.protocol === "udp" ? "selected" : ""}>UDP（含抖动/丢包统计）</option>
         </select></label>
         <label>UDP带宽(M) <input type="number" value="${g.udp_bitrate_mbps || 0}" placeholder="0=按理论值" data-f="udp_bitrate_mbps" data-gi="${gi}"></label>
+        <button onclick="applyCoreLive(${gi})" title="用 coresendmsg 把本组上行参数实时下发到运行中的 CORE">CORE实时应用</button>
         <button onclick="writeBackCore(${gi})" title="把本组启用链路的参数写回 CORE 场景 .imn">写回CORE</button>
         <button onclick="delGroup(${gi})" class="danger">删除组</button>
       </div>
@@ -213,10 +220,20 @@ function renderGroups() {
       </table>
       <button onclick="addLink(${gi})">+ 添加链路</button>
       <div class="ge-break">
-        <label><input type="checkbox" data-f="brk_enabled" data-gi="${gi}" ${brk.enabled ? "checked" : ""}> 断链/容灾测试</label>
-        <label>断开接口 <select data-f="brk_iface" data-gi="${gi}">${ifaceOptions(brk.iface || (g.links && g.links[0] && g.links[0].iface))}</select></label>
-        <label>断开时间点(s)<input type="number" value="${brk.at_sec || 0}" min="0" data-f="brk_at_sec" data-gi="${gi}"></label>
-        <label>恢复间隔(s)<input type="number" value="${brk.restore_sec || 0}" min="0" data-f="brk_restore_sec" data-gi="${gi}"></label>
+        <div class="hint" style="width:100%">断链计划（可多条；同一条的多个接口会同时断开；时间点=测速开始后第几秒）：</div>
+        <table class="ge-links">
+          <thead><tr><th>断开接口(可多选/逗号)</th><th>断开时间点(s)</th><th>恢复间隔(s)</th><th></th></tr></thead>
+          <tbody>
+          ${(g.breaks || []).map((b, bi) => `
+            <tr data-gi="${gi}" data-br="${bi}">
+              <td><input type="text" value="${esc((b.ifaces || []).join(','))}" placeholder="lan1 或 lan1,lan2" style="width:160px" data-f="brk_ifaces" data-gi="${gi}" data-br="${bi}"></td>
+              <td><input type="number" value="${b.at_sec || 0}" min="0" style="width:90px" data-f="brk_at" data-gi="${gi}" data-br="${bi}"></td>
+              <td><input type="number" value="${b.restore_sec || 0}" min="0" style="width:90px" data-f="brk_restore" data-gi="${gi}" data-br="${bi}"></td>
+              <td><button onclick="delBreak(${gi},${bi})" class="danger">×</button></td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+        <button onclick="addBreak(${gi})">+ 添加断链条目</button>
       </div>
     </div>`;
   }).join("") || '<p class="hint">尚未创建实验组，点击右上角“添加实验组”。</p>';
@@ -231,7 +248,7 @@ function addGroup() {
       { label: "链路1", iface: interfacesCache[0] || "eth0", rate_mbps: 100, delay_ms: 10, jitter_ms: 0, loss_pct: 0, enabled: true },
       { label: "链路2", iface: interfacesCache[1] || "eth1", rate_mbps: 50, delay_ms: 20, jitter_ms: 0, loss_pct: 0, enabled: true },
     ],
-    break: { enabled: false, iface: interfacesCache[1] || "eth1", at_sec: 0, restore_sec: 5 },
+    breaks: [{ ifaces: [interfacesCache[1] || "lan2"], at_sec: 0, restore_sec: 10 }],
   });
   renderGroups(); renderGroupSelector();
 }
@@ -241,6 +258,12 @@ function addLink(gi) {
   renderGroups();
 }
 function delLink(gi, li) { GROUPS[gi].links.splice(li, 1); renderGroups(); }
+function addBreak(gi) {
+  GROUPS[gi].breaks = GROUPS[gi].breaks || [];
+  GROUPS[gi].breaks.push({ ifaces: [interfacesCache[0] || "lan1"], at_sec: 0, restore_sec: 10 });
+  renderGroups();
+}
+function delBreak(gi, bi) { GROUPS[gi].breaks.splice(bi, 1); renderGroups(); }
 
 // 输入绑定（事件委托）
 $("groupsEditor").addEventListener("input", onGeInput);
@@ -264,10 +287,13 @@ function onGeInput(ev) {
       : "";
   }
   else if (f === "udp_bitrate_mbps") GROUPS[gi].udp_bitrate_mbps = +el.value;
-  else if (f === "brk_enabled") GROUPS[gi].break = GROUPS[gi].break || {}, GROUPS[gi].break.enabled = el.checked;
-  else if (f === "brk_iface") GROUPS[gi].break = GROUPS[gi].break || {}, GROUPS[gi].break.iface = el.value;
-  else if (f === "brk_at_sec") GROUPS[gi].break = GROUPS[gi].break || {}, GROUPS[gi].break.at_sec = +el.value;
-  else if (f === "brk_restore_sec") GROUPS[gi].break = GROUPS[gi].break || {}, GROUPS[gi].break.restore_sec = +el.value;
+  else if (f === "brk_ifaces") {
+    const bi = +el.dataset.br;
+    GROUPS[gi].breaks = GROUPS[gi].breaks || [];
+    if (GROUPS[gi].breaks[bi]) GROUPS[gi].breaks[bi].ifaces = el.value.split(/[,\s]+/).filter(Boolean);
+  }
+  else if (f === "brk_at") { const bi = +el.dataset.br; (GROUPS[gi].breaks = GROUPS[gi].breaks || [])[bi] && (GROUPS[gi].breaks[bi].at_sec = +el.value); }
+  else if (f === "brk_restore") { const bi = +el.dataset.br; (GROUPS[gi].breaks = GROUPS[gi].breaks || [])[bi] && (GROUPS[gi].breaks[bi].restore_sec = +el.value); }
   else {
     const li = Number(el.dataset.li ?? row?.dataset.li);
     if (!isNaN(li) && GROUPS[gi].links[li]) {
@@ -339,6 +365,33 @@ async function writeBackCore(gi) {
     const r = await api("/api/core-write", { method: "POST", body: JSON.stringify({ lanes }) });
     log("info", "写回成功: " + r.message);
   } catch (e) { log("error", "写回失败: " + e.message); }
+}
+
+function parseCoreLive() {
+  const map = {};
+  ($("cl_map").value || "").split(/\r?\n/).forEach((line) => {
+    const m = line.trim().split(/\s*=\s*/);
+    if (m.length === 2 && m[0].trim()) map[m[0].trim()] = m[1].trim();
+  });
+  return { enabled: $("cl_en").checked, cmd_template: $("cl_tpl").value.trim(),
+           dup: +($("cl_dup").value || 0), map };
+}
+
+async function applyCoreLive(gi) {
+  const g = GROUPS[gi];
+  if (!g) return;
+  await saveFormConfig();
+  const lanes = (g.links || []).filter((l) => l.enabled).map((l) => ({
+    iface: l.iface, rate_mbps: l.rate_mbps || 0, delay_ms: l.delay_ms || 0,
+    jitter_ms: l.jitter_ms || 0, loss_pct: l.loss_pct || 0,
+    dl_rate_mbps: l.dl_rate_mbps, dl_delay_ms: l.dl_delay_ms,
+    dl_jitter_ms: l.dl_jitter_ms, dl_loss_pct: l.dl_loss_pct,
+  }));
+  if (!lanes.length) { log("warn", "没有启用的链路"); return; }
+  try {
+    const r = await api("/api/core-live", { method: "POST", body: JSON.stringify({ lanes }) });
+    log(r.ok ? "info" : "error", "CORE实时应用: " + (r.message || r.error));
+  } catch (e) { log("error", "CORE实时应用失败: " + e.message); }
 }
 
 async function saveGroups() {
@@ -690,10 +743,13 @@ function renderDetailLinks(r) {
 }
 
 function renderDetailBreak(r) {
-  const b = r.break || {};
+  const bs = r.breaks || (r.break && r.break.enabled ? [r.break] : []);
   const lines = [];
-  if (b && b.enabled) {
-    lines.push(`断链接口: ${b.iface || "-"}  时间点: ${b.at_sec || 0}s  恢复间隔: ${b.restore_sec || 0}s`);
+  if (bs && bs.length) {
+    bs.forEach((b, i) => {
+      const ifs = (b.ifaces || [b.iface]).filter(Boolean).join(",");
+      lines.push(`#${i + 1} 断开 ${ifs} @ 第${b.at_sec || 0}s，恢复间隔 ${b.restore_sec || 0}s`);
+    });
     lines.push(`断链恢复耗时(吞吐回到断链前85%): ${r.recovery_sec == null ? "未检测到/未启用" : r.recovery_sec + "s"}`);
   } else lines.push("本组未启用断链/容灾测试。");
   $("detailBreak").textContent = lines.join("\n");

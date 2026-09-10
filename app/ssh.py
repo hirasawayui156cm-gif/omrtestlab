@@ -32,8 +32,9 @@ class SSH:
         if self.use_sudo and cmd.strip() and not cmd.lstrip().startswith("sudo "):
             # sudo 用 secure_path（已含 /sbin、/usr/sbin），无需再补 PATH
             return "sudo -n " + cmd
-        # 非 sudo 直连 shell 可能缺 sbin，补全 PATH
-        return "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/sbin:/bin:$PATH; " + cmd
+        # 非 sudo 直连 shell 可能缺 sbin；顺序保证 /usr/bin(iputils ping) 优先于 /bin(busybox)
+        return ("export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH; "
+                + cmd)
 
     def run(self, cmd: str, timeout: float = 90.0) -> tuple[int, str, str]:
         """一次性执行并等待返回。返回 (exit_code, stdout, stderr)。"""
