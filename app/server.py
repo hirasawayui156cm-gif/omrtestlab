@@ -100,7 +100,14 @@ def health():
 
 @app.get("/api/config")
 def get_config():
-    return CONFIG
+    # Never expose stored SSH passwords to the browser.
+    safe = json.loads(json.dumps(CONFIG))
+    for name in ("router", "vps", "shaper"):
+        section = safe.get(name)
+        if isinstance(section, dict):
+            section["password_set"] = bool(CONFIG.get(name, {}).get("password"))
+            section["password"] = ""
+    return safe
 
 
 @app.post("/api/config")
@@ -108,8 +115,17 @@ def set_config(cfg: dict):
     global CONFIG, RUNNER
     if RUNNER.running:
         return {"ok": False, "error": "测试运行中，无法修改配置"}
+    incoming = json.loads(json.dumps(cfg))
+    for name in ("router", "vps", "shaper"):
+        section = incoming.get(name)
+        if not isinstance(section, dict):
+            continue
+        section.pop("password_set", None)
+        # Empty password means "keep the existing credential".
+        if not section.get("password") and CONFIG.get(name, {}).get("password"):
+            section["password"] = CONFIG[name]["password"]
     CONFIG.clear()
-    CONFIG.update(cfg)
+    CONFIG.update(incoming)
     save_config(CONFIG)
     RUNNER.config = CONFIG
     return {"ok": True}

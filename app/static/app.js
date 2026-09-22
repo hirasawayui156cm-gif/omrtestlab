@@ -13,6 +13,27 @@ let liveSeries = { t: [], up: [], down: [] };
 let liveBase = null;
 let runInProgress = false;
 
+// Theme is local to the browser so offline debugging does not require a server setting.
+function applyTheme(theme) {
+  const next = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem("omr-theme", next);
+  const button = $("themeToggle");
+  if (button) {
+    button.textContent = next === "light" ? "深色" : "浅色";
+    button.setAttribute("aria-label", next === "light" ? "切换到深色主题" : "切换到浅色主题");
+  }
+  if (liveChart) liveChartInit();
+  if (RUNS.length) renderSummaryCharts();
+}
+
+function initTheme() {
+  applyTheme(localStorage.getItem("omr-theme") || "dark");
+  $("themeToggle")?.addEventListener("click", () => {
+    applyTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
+  });
+}
+
 // ---------------- 工具 ----------------
 async function api(url, opts = {}) {
   const o = { headers: { "Content-Type": "application/json" }, ...opts };
@@ -247,6 +268,7 @@ function addGroup() {
     links: [
       { label: "链路1", iface: interfacesCache[0] || "eth0", rate_mbps: 100, delay_ms: 10, jitter_ms: 0, loss_pct: 0, enabled: true },
       { label: "链路2", iface: interfacesCache[1] || "eth1", rate_mbps: 50, delay_ms: 20, jitter_ms: 0, loss_pct: 0, enabled: true },
+      { label: "链路3", iface: interfacesCache[2] || "eth2", rate_mbps: 30, delay_ms: 25, jitter_ms: 0, loss_pct: 0, enabled: true },
     ],
     breaks: [{ ifaces: [interfacesCache[1] || "lan2"], at_sec: 0, restore_sec: 10 }],
   });
@@ -455,12 +477,18 @@ function clearLog() { $("logBox").innerHTML = ""; }
 // ---------------- 实时图表 ----------------
 function liveChartInit() {
   if (liveChart) { liveChart.dispose(); }
+  const css = getComputedStyle(document.documentElement);
+  const dim = css.getPropertyValue("--dim").trim();
+  const line = css.getPropertyValue("--line").trim();
+  const panel = css.getPropertyValue("--panel").trim();
+  const txt = css.getPropertyValue("--txt").trim();
   liveChart = echarts.init($("liveChart"));
   liveChart.setOption({
     grid: { left: 55, right: 20, top: 30, bottom: 30 },
-    legend: { data: ["上行(Mbps)", "下行(Mbps)"], textStyle: { color: "#9fb8d8" } },
-    xAxis: { type: "category", data: [], name: "时间(s)", axisLabel: { color: "#8b9bb4" } },
-    yAxis: { type: "value", name: "Mbps", axisLabel: { color: "#8b9bb4" } },
+    backgroundColor: panel,
+    legend: { data: ["上行(Mbps)", "下行(Mbps)"], textStyle: { color: dim } },
+    xAxis: { type: "category", data: [], name: "时间(s)", axisLabel: { color: dim }, axisLine: { lineStyle: { color: line } } },
+    yAxis: { type: "value", name: "Mbps", nameTextStyle: { color: dim }, axisLabel: { color: dim }, splitLine: { lineStyle: { color: line } } },
     series: [
       { name: "上行(Mbps)", type: "line", showSymbol: false, lineStyle: { color: "#60a5fa", width: 2 }, data: [] },
       { name: "下行(Mbps)", type: "line", showSymbol: false, lineStyle: { color: "#f97316", width: 2 }, data: [] },
@@ -554,10 +582,15 @@ function makeChart(id, w = 420, h = 280) {
   return c;
 }
 function chartOpt(base) {
+  const css = getComputedStyle(document.documentElement);
+  const dim = css.getPropertyValue("--dim").trim();
+  const line = css.getPropertyValue("--line").trim();
+  const panel = css.getPropertyValue("--panel").trim();
+  const txt = css.getPropertyValue("--txt").trim();
   return Object.assign({
     grid: { left: 55, right: 30, top: 40, bottom: 30 },
-    legend: { textStyle: { color: "#9fb8d8" }, top: 5 },
-    tooltip: { trigger: "axis", backgroundColor: "#1a2233", borderColor: "#2c3a55", textStyle: { color: "#dbe4f0" } },
+    legend: { textStyle: { color: dim }, top: 5 },
+    tooltip: { trigger: "axis", backgroundColor: panel, borderColor: line, textStyle: { color: txt } },
   }, base);
 }
 
@@ -779,6 +812,7 @@ async function deleteRuns() {
 }
 
 // ---------------- 启动 ----------------
+initTheme();
 window.addEventListener("resize", () => {
   Object.values(charts).forEach((c) => c && c.resize());
   if (liveChart) liveChart.resize();

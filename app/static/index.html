@@ -3,8 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OMR 多链路聚合测试台</title>
+<title>OMR 多链路聚合实验台</title>
 <link rel="stylesheet" href="/static/style.css">
+<script>
+  document.documentElement.dataset.theme = localStorage.getItem("omr-theme") || "dark";
+</script>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <script>
 window.EChartsLoaded = false;
@@ -30,12 +33,13 @@ if (!window.echarts) __ensureCharts();
 </head>
 <body>
 <header class="topbar">
-  <h1>OMR 多链路聚合测试台</h1>
+  <div class="brand"><span class="brand-mark">OMR</span><div><h1>OMR 多链路聚合实验台</h1><small>三链路实验控制面</small></div></div>
   <div class="topbar-right">
     <span id="runStatus" class="status-dot idle"></span>
     <span id="runStatusText">空闲</span>
     <span class="sep"></span>
-    <span id="connState">未连接</span>
+    <span id="connState" class="connection-badge">离线调试</span>
+    <button id="themeToggle" class="theme-toggle" type="button" title="切换主题" aria-label="切换主题">浅色</button>
   </div>
 </header>
 
@@ -46,18 +50,24 @@ if (!window.echarts) __ensureCharts();
   <button class="tab" data-tab="result">结果分析</button>
 </nav>
 
+<div class="debug-banner" role="status">
+  <span class="status-dot idle"></span>
+  <div><strong>离线调试模式</strong><span>当前未接入 OMR、PVE 或 Debian 设备，可先设计实验和检查界面流程。</span></div>
+  <span class="debug-chip">不会自动连接远端</span>
+</div>
+
 <main>
   <!-- ============ 环境配置 ============ -->
   <section id="tab-env" class="tabpage active">
     <div class="card">
-      <h2>路由器（香蕉派 OMR 客户端）</h2>
+      <h2>OMR 客户端（PVE 中的路由镜像）</h2>
       <div class="grid3">
         <label>主机地址<input id="r_host" placeholder="192.168.100.1"></label>
         <label>SSH 端口<input id="r_port" type="number" value="22"></label>
         <label>用户名<input id="r_user" value="root"></label>
       </div>
       <div class="grid2">
-        <label>密码<input id="r_pass" type="password" autocomplete="new-password"></label>
+        <label>SSH 密码<input id="r_pass" type="password" autocomplete="new-password" placeholder="留空保持已保存凭据"></label>
         <label class="chk"><input type="checkbox" id="r_sudo"> 使用 sudo 执行</label>
       </div>
       <div class="btnrow">
@@ -68,14 +78,14 @@ if (!window.echarts) __ensureCharts();
     </div>
 
     <div class="card">
-      <h2>VPS（OMR 服务端 / iperf3 Server）</h2>
+      <h2>Debian VPS（OMR 服务端 / iperf3 Server）</h2>
       <div class="grid3">
         <label>主机地址<input id="v_host" placeholder="VPS 公网 IP"></label>
         <label>SSH 端口<input id="v_port" type="number" value="22"></label>
         <label>用户名<input id="v_user" value="root"></label>
       </div>
       <div class="grid2">
-        <label>密码<input id="v_pass" type="password" autocomplete="new-password"></label>
+        <label>SSH 密码<input id="v_pass" type="password" autocomplete="new-password" placeholder="留空保持已保存凭据"></label>
         <label class="chk"><input type="checkbox" id="v_sudo"> 使用 sudo 执行</label>
       </div>
       <div class="grid2">
@@ -116,14 +126,14 @@ eth3=1,8,1,0</textarea>
     </div>
 
     <div class="card">
-      <h2>整形网关（电脑C，跑 CORE）</h2>
+      <h2>实验整形网关（CORE / 外部仿真）</h2>
       <div class="grid3">
         <label>主机地址<input id="g_host" placeholder="电脑C的IP"></label>
         <label>SSH 端口<input id="g_port" type="number" value="22"></label>
         <label>用户名<input id="g_user" value="root"></label>
       </div>
       <div class="grid2">
-        <label>密码<input id="g_pass" type="password" autocomplete="new-password"></label>
+        <label>SSH 密码<input id="g_pass" type="password" autocomplete="new-password" placeholder="留空保持已保存凭据"></label>
         <label class="chk"><input type="checkbox" id="g_sudo"> 使用 sudo 执行</label>
       </div>
       <div class="grid2">
